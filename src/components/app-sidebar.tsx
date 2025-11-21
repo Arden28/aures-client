@@ -33,6 +33,9 @@ import {
   SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar"
+import useAuth from "@/hooks/useAuth"
+
+// Import auth hook to get current role
 
 // This is sample data.
 const data = {
@@ -43,33 +46,26 @@ const data = {
   },
   teams: [
     {
-      name: "Acme Inc",
-      logo: GalleryVerticalEnd,
-      plan: "Enterprise",
-    },
-    {
-      name: "Acme Corp.",
-      logo: AudioWaveform,
-      plan: "Startup",
-    },
-    {
-      name: "Evil Corp.",
-      logo: Command,
-      plan: "Free",
+      name: "Aures Manager",
+      logo: HandPlatter,
+      plan: "Restaurant",
     },
   ],
+  // We define all items here, but we will filter them in the component
   navMain: [
     {
       title: "Overview",
       url: "/",
       icon: LayoutDashboard,
       isActive: true,
+      // No roles array implies "public" (to authenticated users)
     },
     {
       title: "Menus",
       url: "#",
       icon: EggFried,
       isActive: true,
+      roles: ["owner", "manager"], // Custom property for filtering
       items: [
         {
           title: "Categories",
@@ -85,6 +81,7 @@ const data = {
       title: "Floors & Tables",
       url: "#",
       icon: HandPlatter,
+      roles: ["owner", "manager"],
       items: [
         {
           title: "Floor Plans",
@@ -100,33 +97,51 @@ const data = {
       title: "Orders",
       url: "/orders",
       icon: UtensilsCrossed,
+      roles: ["owner", "manager"],
     },
     {
       title: "Clients",
       url: "/clients",
       icon: UsersRound,
+      roles: ["owner", "manager"],
     },
     {
       title: "Staff",
       url: "/staff",
       icon: Users,
+      roles: ["owner", "manager"],
     },
     {
       title: "Settings",
       url: "/settings",
       icon: Settings,
+      roles: ["owner", "manager"],
     },
   ],
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { user } = useAuth()
+  const userRole = user?.role || "waiter" // Default to restricted role if undefined
+
+  // Filter navigation items based on role
+  const filteredNavMain = React.useMemo(() => {
+    return data.navMain.filter((item) => {
+      // If the item has no specific 'roles' property, it's visible to everyone
+      if (!item.roles) return true
+      
+      // Otherwise, check if the user's role is in the allowed list
+      return item.roles.includes(userRole)
+    })
+  }, [userRole])
+
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <TeamSwitcher teams={data.teams} />
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
+        <NavMain items={filteredNavMain} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser />
