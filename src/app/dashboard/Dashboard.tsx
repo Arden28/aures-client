@@ -2,6 +2,7 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import {
   TrendingUp,
   ShoppingCart,
@@ -9,6 +10,7 @@ import {
   Activity,
   AlertCircle,
   BarChart3,
+  Store,
 } from "lucide-react"
 import {
   AreaChart,
@@ -50,6 +52,7 @@ import {
   TabsContent,
 } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import {
   Table,
@@ -64,13 +67,19 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { toast } from "sonner"
+import useAuth from "@/hooks/useAuth"
 
 type LoadingState = "idle" | "loading" | "success" | "error"
 
 export default function Dashboard() {
+  const { user } = useAuth()
   const [timeframe, setTimeframe] = useState<DashboardTimeframe>("today")
   const [overview, setOverview] = useState<DashboardOverview | null>(null)
   const [state, setState] = useState<LoadingState>("idle")
+
+  // Determine POS path based on role
+  const role = (user as any)?.role
+  const posLink = role === "kitchen" ? "/pos/kitchen" : "/pos/tables"
 
   useEffect(() => {
     let mounted = true
@@ -117,6 +126,13 @@ export default function Dashboard() {
           </div>
 
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <Button asChild className="w-full sm:w-auto bg-primary text-primary-foreground shadow-sm">
+              <Link to={posLink}>
+                <Store className="mr-2 h-4 w-4" />
+                Open POS Interface
+              </Link>
+            </Button>
+
             <Tabs
               value={timeframe}
               onValueChange={(value) => setTimeframe(value as DashboardTimeframe)}
@@ -238,7 +254,6 @@ export default function Dashboard() {
                         <Area
                           type="monotone"
                           dataKey="total"
-                          // FIX: Cast to string
                           name={revenueChartConfig.total.label as string}
                           stroke="var(--color-total, hsl(var(--chart-1)))"
                           fill="var(--color-total, hsl(var(--chart-1)))"
@@ -300,21 +315,18 @@ export default function Dashboard() {
                         <Bar
                           dataKey="dine_in"
                           stackId="orders"
-                          // FIX: Cast to string
                           name={ordersChartConfig.dine_in.label as string}
                           fill="var(--color-dine_in, hsl(var(--chart-2)))"
                         />
                         <Bar
                           dataKey="online"
                           stackId="orders"
-                          // FIX: Cast to string
                           name={ordersChartConfig.online.label as string}
                           fill="var(--color-online, hsl(var(--chart-3)))"
                         />
                         <Bar
                           dataKey="takeaway"
                           stackId="orders"
-                          // FIX: Cast to string
                           name={ordersChartConfig.takeaway.label as string}
                           fill="var(--color-takeaway, hsl(var(--chart-4)))"
                         />
