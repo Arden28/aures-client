@@ -11,6 +11,9 @@ import PosLayout from "@/layouts/PosLayout" // <- instead of RunnerLayout
 import PosTables from "@/app/pos/PosTables"
 import PosBilling from "@/app/pos/PosBilling"
 import KDS from "@/app/pos/KDS"
+import RequireRole from "@/components/RequireRole"
+import PosRegister from "@/app/pos/PosRegister"
+import PosOrders from "@/app/pos/PosOrders"
 
 /* -------------------------------------------------------------------------- */
 /*                                Lazy pages                                  */
@@ -79,35 +82,45 @@ export const router = createBrowserRouter([
         ],
       },
 
+
+
       /* ------------------------ BACKOFFICE ROUTES ------------------------ */
       {
         path: "/",
         element: <AppLayout />,
         children: [
           {
-            element: <RequireAuth />,
+            element: <RequireAuth />, // any logged-in user
             children: [
-              // default -> dashboard
+              // "/" → "/dashboard"
               { index: true, element: <Navigate to="dashboard" replace /> },
 
-              // Owner / manager main pages
+              // Dashboard open to all authenticated roles
               { path: "dashboard", element: withSuspense(<Dashboard />) },
 
-              // Menu
-              { path: "menu/products", element: withSuspense(<Products />) },
-              { path: "menu/categories", element: withSuspense(<Categories />) },
+              // Owner + Manager only
+              {
+                element: (
+                  <RequireRole allowed={["owner", "manager"]} />
+                ),
+                children: [
+                  // Menu
+                  { path: "menu/products", element: withSuspense(<Products />) },
+                  { path: "menu/categories", element: withSuspense(<Categories />) },
 
-              // Dining area
-              { path: "floors", element: withSuspense(<FloorPlans />) },
-              { path: "tables", element: withSuspense(<Tables />) },
+                  // Dining area
+                  { path: "floors", element: withSuspense(<FloorPlans />) },
+                  { path: "tables", element: withSuspense(<Tables />) },
 
-              // Operations
-              { path: "orders", element: withSuspense(<Orders />) },
-              { path: "clients", element: withSuspense(<Clients />) },
-              { path: "staff", element: withSuspense(<Staff />) },
+                  // Operations
+                  { path: "orders", element: withSuspense(<Orders />) },
+                  { path: "clients", element: withSuspense(<Clients />) },
+                  { path: "staff", element: withSuspense(<Staff />) },
 
-              // Settings
-              { path: "settings", element: withSuspense(<Settings />) },
+                  // Settings
+                  { path: "settings", element: withSuspense(<Settings />) },
+                ],
+              },
             ],
           },
         ],
@@ -119,18 +132,30 @@ export const router = createBrowserRouter([
         element: <PosLayout />,
         children: [
           {
-            element: <RequireAuth />, // you can make this role-aware later (waiter/cashier/kitchen)
+            // 1. Require Login
+            element: <RequireAuth />, 
             children: [
-              // default -> tables
-              { index: true, element: <Navigate to="tables" replace /> },
+              {
+                // 2. Require specific POS roles (waiter, kitchen, cashier)
+                element: <RequireRole allowed={["waiter", "kitchen", "cashier"]} />,
+                children: [
+                  // default -> tables
+                  { index: true, element: <Navigate to="tables" replace /> },
 
-              { path: "tables", element: withSuspense(<PosTables />) },
-              { path: "billing", element: withSuspense(<PosBilling />) },
-              { path: "kds", element: withSuspense(<KDS />) },
+                  { path: "tables", element: withSuspense(<PosTables />) },
+                  { path: "register", element: withSuspense(<PosRegister />) },
+                  { path: "orders", element: withSuspense(<PosOrders />) },
+                  { path: "billing", element: withSuspense(<PosBilling />) },
+                  
+                  // Changed "kitchen" to "kds" to match PosLayout link logic
+                  { path: "kitchen", element: withSuspense(<KDS />) },
+                ]
+              }
             ],
           },
         ],
       },
+
 
       /* ----------------------------- FALLBACK ----------------------------- */
       { path: "*", element: withSuspense(<NotFound />) },
