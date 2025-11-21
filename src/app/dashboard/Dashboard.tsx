@@ -238,7 +238,8 @@ export default function Dashboard() {
                         <Area
                           type="monotone"
                           dataKey="total"
-                          name={revenueChartConfig.total.label}
+                          // FIX: Cast to string
+                          name={revenueChartConfig.total.label as string}
                           stroke="var(--color-total, hsl(var(--chart-1)))"
                           fill="var(--color-total, hsl(var(--chart-1)))"
                           fillOpacity={0.15}
@@ -299,19 +300,22 @@ export default function Dashboard() {
                         <Bar
                           dataKey="dine_in"
                           stackId="orders"
-                          name={ordersChartConfig.dine_in.label}
+                          // FIX: Cast to string
+                          name={ordersChartConfig.dine_in.label as string}
                           fill="var(--color-dine_in, hsl(var(--chart-2)))"
                         />
                         <Bar
                           dataKey="online"
                           stackId="orders"
-                          name={ordersChartConfig.online.label}
+                          // FIX: Cast to string
+                          name={ordersChartConfig.online.label as string}
                           fill="var(--color-online, hsl(var(--chart-3)))"
                         />
                         <Bar
                           dataKey="takeaway"
                           stackId="orders"
-                          name={ordersChartConfig.takeaway.label}
+                          // FIX: Cast to string
+                          name={ordersChartConfig.takeaway.label as string}
                           fill="var(--color-takeaway, hsl(var(--chart-4)))"
                         />
                         <ChartLegend content={<ChartLegendContent />} />

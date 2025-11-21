@@ -526,7 +526,6 @@ export default function Orders() {
                           // backend: product: { id, name, price }
                           // we still support a fallback if you map it differently
                           // (e.g. product_name on the API type)
-                          // @ts-expect-error - product might not be on the TS type yet
                           item.product?.name ??
                           // @ts-expect-error - optional product_name
                           item.product_name ??
@@ -535,7 +534,6 @@ export default function Orders() {
                         const unit = item.unit_price
                         const total = item.total_price
                         const qty = item.quantity
-                        // @ts-expect-error - optional notes from backend
                         const notes = item.notes as string | null | undefined
                         const status = item.status as string
 
