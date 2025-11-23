@@ -8,12 +8,8 @@ import GuestOnly from "@/components/GuestOnly"
 import AppLayout from "@/layouts/AppLayout"
 import AuthLayout from "@/layouts/AuthLayout"
 import PosLayout from "@/layouts/PosLayout" // <- instead of RunnerLayout
-import PosTables from "@/app/pos/PosTables"
-import PosBilling from "@/app/pos/PosBilling"
-import KDS from "@/app/pos/KDS"
 import RequireRole from "@/components/RequireRole"
-import PosRegister from "@/app/pos/PosRegister"
-import PosOrders from "@/app/pos/PosOrders"
+import PortalLayout from "@/layouts/PortalLayout"
 
 /* -------------------------------------------------------------------------- */
 /*                                Lazy pages                                  */
@@ -35,9 +31,14 @@ const Staff = React.lazy(() => import("@/app/dashboard/Staff"))
 const Settings = React.lazy(() => import("@/app/dashboard/Settings"))
 
 // POS
-// const PosTables = React.lazy(() => import("@/app/pos/PosTables"))
-// const PosBilling = React.lazy(() => import("@/app/pos/PosBilling"))
-// const KDS = React.lazy(() => import("@/app/pos/KDS"))
+const PosTables = React.lazy(() => import("@/app/pos/PosTables"))
+const PosBilling = React.lazy(() => import("@/app/pos/PosBilling"))
+const PosRegister = React.lazy(() => import("@/app/pos/PosRegister"))
+const KDS = React.lazy(() => import("@/app/pos/KDS"))
+const PosOrders = React.lazy(() => import("@/app/pos/PosOrders"))
+
+// Portal
+const PortalPage = React.lazy(() => import("@/app/portal/PortalPage"))
 
 // Generic
 const NotFound = React.lazy(() => import("@/app/NotFound"))
@@ -153,6 +154,15 @@ export const router = createBrowserRouter([
               }
             ],
           },
+        ],
+      },
+
+      /* ----------------------------- PORTAL ROUTES --------------------------- */
+      {
+        path: "/portal",
+        element: <PortalLayout />,
+        children: [
+            { index: true, element: withSuspense(<PortalPage />) },
         ],
       },
 

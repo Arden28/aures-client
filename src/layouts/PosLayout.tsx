@@ -1,4 +1,4 @@
-// src/app/pos/PosLayout.tsx
+// src/layouts/PosLayout.tsx
 "use client"
 
 import * as React from "react"
