@@ -11,13 +11,19 @@ import {
   Search, 
   Flame, 
   CheckCircle2,
-  X
+  X,
+  ChefHat,
+  Clock,
+  Utensils,
+  BellRing,
+  Receipt,
+  MapPin
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Drawer,
   DrawerClose,
@@ -27,15 +33,19 @@ import {
 } from "@/components/ui/drawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs" // Assuming you have shadcn tabs, otherwise I simulate them
 
 import { 
   fetchPortalMenu, 
   fetchPortalSession, 
   placePortalOrder,
+  subscribeToOrderUpdates,
   type PortalCategory, 
   type PortalProduct, 
   type PortalCartItem,
-  type TableSession
+  type TableSession,
+  type ActiveOrder,
+  type OrderStatus
 } from "@/api/portal"
 
 /* -------------------------------------------------------------------------- */
@@ -54,11 +64,15 @@ export default function PortalPage() {
   const [cart, setCart] = React.useState<PortalCartItem[]>([])
   const [isCartOpen, setIsCartOpen] = React.useState(false)
   const [isOrdering, setIsOrdering] = React.useState(false)
-  const [orderPlaced, setOrderPlaced] = React.useState(false)
+  
+  // Active Order Tracking State
+  const [activeOrder, setActiveOrder] = React.useState<ActiveOrder | null>(null)
+  const [isTrackerOpen, setIsTrackerOpen] = React.useState(false)
 
   // Product Detail Modal State
   const [selectedProduct, setSelectedProduct] = React.useState<PortalProduct | null>(null)
   const [tempQty, setTempQty] = React.useState(1)
+  const [tempNotes, setTempNotes] = React.useState("") 
 
   // Scroll Refs for Categories
   const categoryScrollRef = React.useRef<HTMLDivElement>(null)
@@ -90,6 +104,19 @@ export default function PortalPage() {
     }
     load()
   }, [])
+
+  // -- Order Subscription Logic
+  React.useEffect(() => {
+    if (activeOrder && activeOrder.status !== 'served') {
+      const unsubscribe = subscribeToOrderUpdates(activeOrder.id, (newStatus) => {
+        setActiveOrder(prev => prev ? { ...prev, status: newStatus } : null)
+        if (newStatus === 'served') {
+          toast.success("Your order has been served! Enjoy your meal.")
+        }
+      })
+      return () => unsubscribe()
+    }
+  }, [activeOrder?.id, activeOrder?.status])
 
   // -- Category Scroll Logic
   const checkScroll = () => {
@@ -125,9 +152,9 @@ export default function PortalPage() {
     if (!selectedProduct) return
     
     setCart(prev => {
-      const existing = prev.find(i => i.product.id === selectedProduct.id)
+      const existing = prev.find(i => i.product.id === selectedProduct.id && i.notes === tempNotes)
       if (existing) {
-        return prev.map(i => i.product.id === selectedProduct.id 
+        return prev.map(i => (i.product.id === selectedProduct.id && i.notes === tempNotes)
           ? { ...i, quantity: i.quantity + tempQty } 
           : i
         )
@@ -135,22 +162,26 @@ export default function PortalPage() {
       return [...prev, { 
         tempId: crypto.randomUUID(), 
         product: selectedProduct, 
-        quantity: tempQty 
+        quantity: tempQty,
+        notes: tempNotes 
       }]
     })
     
     toast.success(`Added ${tempQty}x ${selectedProduct.name}`)
     setSelectedProduct(null)
     setTempQty(1)
+    setTempNotes("") 
   }
 
   const handlePlaceOrder = async () => {
     if (!session) return
     setIsOrdering(true)
     try {
-      await placePortalOrder(session, cart)
-      setOrderPlaced(true)
+      const newOrder = await placePortalOrder(session, cart)
+      setActiveOrder(newOrder)
+      setIsTrackerOpen(true) 
       setCart([]) 
+      setIsCartOpen(false)
     } catch (e) {
       toast.error("Failed to place order")
     } finally {
@@ -169,11 +200,8 @@ export default function PortalPage() {
   // -- Render Loading
   if (isLoading) return <PortalSkeleton />
 
-  // -- Render Success State
-  if (orderPlaced) return <OrderSuccessView onReset={() => setOrderPlaced(false)} />
-
   return (
-    <div className="relative min-h-[calc(100vh-4rem)] pb-32">
+    <div className="relative min-h-[calc(100vh-4rem)] pb-36"> {/* Increased padding bottom to accommodate stacked buttons */}
       
       {/* 1. Hero / Welcome */}
       <div className="px-6 py-8 md:py-12 text-center md:text-left space-y-2 max-w-3xl mx-auto">
@@ -197,26 +225,18 @@ export default function PortalPage() {
         </div>
       </div>
 
-      {/* 3. Categories (Sticky + Enhanced Scroll) */}
+      {/* 3. Categories */}
       <div className="sticky top-[4rem] z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-border/40 py-2">
         <div className="relative max-w-7xl mx-auto px-2 md:px-6 flex items-center">
-          
-          {/* Desktop Left Arrow */}
           <div className={cn(
             "hidden md:flex absolute left-0 top-0 bottom-0 w-24 bg-gradient-to-r from-background to-transparent z-10 items-center justify-start pl-4 transition-opacity duration-300",
             !canScrollLeft && "opacity-0 pointer-events-none"
           )}>
-             <Button 
-                size="icon" 
-                variant="outline" 
-                className="h-8 w-8 rounded-full bg-background shadow-md border-border/60 hover:scale-110 transition-transform"
-                onClick={() => scrollCategories('left')}
-             >
+             <Button size="icon" variant="outline" className="h-8 w-8 rounded-full bg-background shadow-md border-border/60 hover:scale-110 transition-transform" onClick={() => scrollCategories('left')}>
                 <ChevronLeft className="h-4 w-4" />
              </Button>
           </div>
 
-          {/* Scroll Container */}
           <div 
             ref={categoryScrollRef}
             className="flex w-full overflow-x-auto gap-2 p-2 px-4 scrollbar-hide snap-x snap-mandatory"
@@ -239,24 +259,18 @@ export default function PortalPage() {
             ))}
           </div>
 
-          {/* Desktop Right Arrow */}
           <div className={cn(
             "hidden md:flex absolute right-0 top-0 bottom-0 w-24 bg-gradient-to-l from-background to-transparent z-10 items-center justify-end pr-4 transition-opacity duration-300",
             !canScrollRight && "opacity-0 pointer-events-none"
           )}>
-             <Button 
-                size="icon" 
-                variant="outline" 
-                className="h-8 w-8 rounded-full bg-background shadow-md border-border/60 hover:scale-110 transition-transform"
-                onClick={() => scrollCategories('right')}
-             >
+             <Button size="icon" variant="outline" className="h-8 w-8 rounded-full bg-background shadow-md border-border/60 hover:scale-110 transition-transform" onClick={() => scrollCategories('right')}>
                 <ChevronRight className="h-4 w-4" />
              </Button>
           </div>
         </div>
       </div>
 
-      {/* 4. Product Grid (Responsive) */}
+      {/* 4. Product Grid */}
       <div className="px-4 md:px-6 py-6 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
           {filteredProducts.map((product) => (
@@ -264,11 +278,11 @@ export default function PortalPage() {
               key={product.id}
               onClick={() => {
                 setTempQty(1)
+                setTempNotes("")
                 setSelectedProduct(product)
               }}
               className="group relative flex sm:flex-col gap-4 p-3 md:p-4 rounded-3xl border border-border/40 bg-card/50 hover:bg-card hover:border-primary/20 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 cursor-pointer overflow-hidden"
             >
-              {/* Image */}
               <div className="relative h-28 w-28 sm:h-48 sm:w-full shrink-0 overflow-hidden rounded-2xl bg-muted">
                 <img 
                   src={product.image} 
@@ -281,8 +295,6 @@ export default function PortalPage() {
                   </div>
                 )}
               </div>
-
-              {/* Details */}
               <div className="flex flex-1 flex-col justify-between">
                 <div className="space-y-1.5">
                   <h3 className="font-bold text-lg text-foreground leading-tight line-clamp-2 group-hover:text-primary transition-colors">
@@ -292,7 +304,6 @@ export default function PortalPage() {
                     {product.description}
                   </p>
                 </div>
-                
                 <div className="flex items-end justify-between mt-4">
                   <span className="font-bold text-lg text-primary">
                     {formatMoney(product.price, currency)}
@@ -307,9 +318,42 @@ export default function PortalPage() {
         </div>
       </div>
 
-      {/* 5. Floating Cart Button */}
+      {/* 5. Active Order Tracker Pill (Dynamic Positioning) */}
       <AnimatePresence>
-        {cartCount > 0 && (
+        {activeOrder && !isTrackerOpen && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            // Logic: If cart has items, push this pill up to bottom-24, otherwise bottom-6
+            className={cn(
+                "fixed right-4 sm:right-6 z-40 transition-all duration-500 ease-in-out",
+                cartCount > 0 ? "bottom-24" : "bottom-6"
+            )}
+          >
+             <Button 
+                onClick={() => setIsTrackerOpen(true)}
+                className="h-14 pl-2 pr-6 rounded-full bg-card border-2 border-primary/20 shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-105 transition-all flex items-center gap-3"
+             >
+                <div className="relative h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
+                  <BellRing className="h-5 w-5 text-primary" />
+                  <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-500 rounded-full animate-pulse border-2 border-white" />
+                </div>
+                <div className="flex flex-col items-start text-xs">
+                   <span className="font-bold text-sm text-foreground">Order #{activeOrder.id}</span>
+                   <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      <span className="capitalize">{activeOrder.status}</span>
+                   </div>
+                </div>
+             </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 6. Floating Cart Button */}
+      <AnimatePresence>
+        {cartCount > 0 && !isTrackerOpen && (
           <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -340,22 +384,12 @@ export default function PortalPage() {
         )}
       </AnimatePresence>
 
-      {/* 6. Product Detail Drawer (FIXED) */}
+      {/* 7. Product Detail Drawer */}
       <Drawer open={!!selectedProduct} onOpenChange={(o) => !o && setSelectedProduct(null)}>
-        {/* Changes here:
-          - sm:max-h-[85vh]: Constrains height on desktop so it doesn't reach the top.
-          - sm:mt-4: Adds a little margin at the top on desktop.
-          - sm:rounded-t-[2rem]: More pronounced rounding on desktop.
-        */}
         <DrawerContent className="max-w-lg mx-auto h-auto max-h-[94vh] sm:max-h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 outline-none flex flex-col">
           {selectedProduct && (
-            // Added overflow-y-auto here so content scrolls inside the constrained height
             <div className="mx-auto w-full flex-1 overflow-y-auto rounded-t-[inherit]">
               <div className="p-0 relative">
-                {/* Changes here:
-                  - Removed aspect-video.
-                  - Used fixed responsive heights: h-64 on mobile, sm:h-80 on desktop.
-                */}
                 <div className="relative h-64 sm:h-80 w-full overflow-hidden rounded-t-[inherit] bg-muted">
                   <img 
                     src={selectedProduct.image} 
@@ -363,8 +397,6 @@ export default function PortalPage() {
                     className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/30 to-transparent opacity-80" />
-                  
-                  {/* Close button overlaid on image */}
                   <DrawerClose asChild>
                     <Button variant="ghost" size="icon" className="absolute top-4 right-4 bg-black/20 hover:bg-black/40 text-white rounded-full h-10 w-10 backdrop-blur-sm">
                       <X className="h-5 w-5" />
@@ -373,7 +405,7 @@ export default function PortalPage() {
                 </div>
               </div>
               
-              <div className="px-6 pt-6 pb-36">
+              <div className="px-6 pt-6 pb-48">
                  <DrawerHeader className="text-left p-0 space-y-4">
                   <div className="flex flex-col gap-2">
                     {selectedProduct.is_popular && (
@@ -391,19 +423,23 @@ export default function PortalPage() {
                     {selectedProduct.description}
                   </p>
                   
-                  {selectedProduct.calories && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Flame className="h-4 w-4 text-orange-500" />
-                      <span>{selectedProduct.calories} kcal</span>
-                    </div>
-                  )}
+                  <div className="pt-4 space-y-3">
+                    <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                      <ChefHat className="h-4 w-4" />
+                      Special Instructions
+                    </label>
+                    <Textarea 
+                      value={tempNotes}
+                      onChange={(e) => setTempNotes(e.target.value)}
+                      placeholder="Allergies, removal of ingredients, extra sauce..."
+                      className="resize-none bg-muted/30 border-border/50 focus:bg-background transition-all min-h-[80px] rounded-xl"
+                    />
+                  </div>
                 </DrawerHeader>
-
               </div>
             </div>
           )}
 
-           {/* Fixed bottom section for Qty selector */}
            {selectedProduct && (
              <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md absolute bottom-0 left-0 right-0 rounded-b-[inherit]">
                <div className="flex items-center justify-between gap-4 mb-4">
@@ -438,12 +474,8 @@ export default function PortalPage() {
         </DrawerContent>
       </Drawer>
 
-      {/* 7. Cart Drawer (FIXED) */}
+      {/* 8. Cart Drawer */}
       <Drawer open={isCartOpen} onOpenChange={setIsCartOpen}>
-        {/* Changes here:
-          - sm:h-[85vh]: Constrains height on desktop.
-          - sm:mt-4, sm:rounded-t-[2rem]: Desktop specific styling for reachability.
-        */}
         <DrawerContent className="max-w-lg mx-auto h-[92vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
           <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-center">
              <DrawerClose asChild>
@@ -466,12 +498,18 @@ export default function PortalPage() {
               cart.map((item, idx) => (
                 <div key={idx} className="flex items-start justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards" style={{ animationDelay: `${idx * 50}ms` }}>
                   <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary text-sm font-bold border border-primary/20">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary text-sm font-bold border border-primary/20 shrink-0">
                       {item.quantity}x
                     </div>
                     <div>
                       <p className="font-bold text-base">{item.product.name}</p>
                       <p className="text-sm text-muted-foreground">{formatMoney(item.product.price, currency)} each</p>
+                      {item.notes && (
+                        <div className="mt-1 flex items-start gap-1.5 text-xs text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400 p-1.5 rounded-md">
+                          <ChefHat className="h-3 w-3 mt-0.5 shrink-0" />
+                          <span className="italic leading-snug">"{item.notes}"</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <p className="font-bold text-base tabular-nums">
@@ -506,31 +544,182 @@ export default function PortalPage() {
         </DrawerContent>
       </Drawer>
 
+      {/* 9. Live Order Tracker (Redesigned) */}
+      <LiveOrderTracker 
+        isOpen={isTrackerOpen} 
+        onClose={() => setIsTrackerOpen(false)} 
+        order={activeOrder} 
+        currency={currency}
+      />
+
     </div>
   )
 }
 
-/* -------------------------- Helpers -------------------------- */
-// ... (Helpers remain the same as the previous response)
-function OrderSuccessView({ onReset }: { onReset: () => void }) {
+/* -------------------------- Sub-components -------------------------- */
+
+function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolean, onClose: () => void, order: ActiveOrder | null, currency: string }) {
+  if (!order) return null
+
+  // Status mapping
+  const steps: { id: OrderStatus, label: string, icon: React.ReactNode }[] = [
+    { id: 'received', label: 'Received', icon: <Receipt className="h-4 w-4" /> },
+    { id: 'preparing', label: 'Preparing', icon: <ChefHat className="h-4 w-4" /> },
+    { id: 'ready', label: 'On Way', icon: <Utensils className="h-4 w-4" /> },
+    { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-4 w-4" /> },
+  ]
+
+  const currentStepIndex = steps.findIndex(s => s.id === order.status)
+  const orderTotal = order.items.reduce((acc, item) => acc + (item.product.price * item.quantity), 0)
+
   return (
-    <div className="flex min-h-[70vh] flex-col items-center justify-center p-6 text-center space-y-8 max-w-md mx-auto animate-in fade-in zoom-in duration-500">
-      <div className="relative">
-        <div className="absolute inset-0 bg-green-500 blur-2xl opacity-20 rounded-full" />
-        <div className="relative h-28 w-28 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center text-green-600 dark:text-green-400 border-4 border-white dark:border-background shadow-xl">
-          <CheckCircle2 className="h-14 w-14" />
+    <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      {/* Applied sm:max-h-[85vh] sm:mt-4 sm:rounded-t-[2rem] 
+         This makes it reachable on desktop and consistent with other drawers 
+      */}
+      <DrawerContent className="max-w-lg mx-auto h-[90vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
+        
+        {/* Header */}
+        <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-between px-6 pt-6">
+           <div className="text-left">
+             <DrawerTitle className="text-2xl font-bold flex items-center gap-2">
+                Order Status
+                <span className="flex h-2.5 w-2.5 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+             </DrawerTitle>
+             <p className="text-sm text-muted-foreground font-medium mt-1">Order #{order.id}</p>
+           </div>
+           <DrawerClose asChild>
+              <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 hover:bg-muted">
+                <X className="h-5 w-5" />
+              </Button>
+          </DrawerClose>
+        </DrawerHeader>
+
+        {/* Content - Scrollable */}
+        <div className="flex-1 overflow-y-auto bg-muted/5">
+            <div className="p-6 space-y-8">
+                
+                {/* 1. Status Pulse */}
+                <div className="flex justify-center py-4">
+                    <div className="relative">
+                       <div className={cn(
+                         "h-40 w-40 rounded-full flex flex-col items-center justify-center border-4 shadow-xl transition-all duration-700",
+                         order.status === 'served' 
+                            ? "bg-green-50 border-green-200 text-green-700" 
+                            : "bg-background border-primary/10 text-foreground"
+                       )}>
+                          {order.status === 'served' ? (
+                             <>
+                               <CheckCircle2 className="h-10 w-10 mb-2 text-green-600" />
+                               <span className="font-bold text-lg">Completed</span>
+                             </>
+                          ) : (
+                             <>
+                               <div className="text-4xl font-black tabular-nums tracking-tighter">
+                                 {order.estimatedTime.split(' ')[0]}
+                               </div>
+                               <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground mt-1">Minutes</span>
+                               <span className="text-[10px] text-muted-foreground/60 font-medium mt-2 bg-muted px-2 py-0.5 rounded-full">ESTIMATED</span>
+                             </>
+                          )}
+                       </div>
+                       {order.status !== 'served' && (
+                         <div className="absolute inset-0 rounded-full border-4 border-primary/20 animate-ping opacity-30 duration-1000" />
+                       )}
+                    </div>
+                </div>
+
+                {/* 2. Timeline Steps */}
+                <div className="bg-card rounded-2xl border border-border/50 p-6 shadow-sm">
+                   <div className="flex justify-between items-start relative">
+                        {/* Connecting Line */}
+                        <div className="absolute top-4 left-0 right-0 h-0.5 bg-muted -z-0 mx-4" />
+                        
+                        {steps.map((step, idx) => {
+                             const isCompleted = idx <= currentStepIndex
+                             const isCurrent = idx === currentStepIndex
+                             return (
+                                <div key={step.id} className="flex flex-col items-center gap-2 relative z-10">
+                                   <div className={cn(
+                                      "h-9 w-9 rounded-full flex items-center justify-center border-2 transition-all duration-500",
+                                      isCompleted 
+                                        ? "bg-primary border-primary text-primary-foreground shadow-md" 
+                                        : "bg-card border-border text-muted-foreground"
+                                   )}>
+                                      {step.icon}
+                                   </div>
+                                   <span className={cn(
+                                       "text-[10px] font-bold uppercase tracking-wider transition-colors",
+                                       isCurrent ? "text-primary" : "text-muted-foreground"
+                                   )}>
+                                      {step.label}
+                                   </span>
+                                </div>
+                             )
+                        })}
+                   </div>
+                </div>
+
+                {/* 3. Order Receipt */}
+                <div className="space-y-3">
+                    <h3 className="font-semibold flex items-center gap-2 ml-1">
+                        <Receipt className="h-4 w-4 text-primary" />
+                        Order Summary
+                    </h3>
+                    <div className="bg-card rounded-2xl border border-border/50 overflow-hidden shadow-sm">
+                        {/* Receipt Header */}
+                        <div className="bg-muted/30 p-4 border-b border-dashed border-border flex justify-between items-center text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                           <span>Item</span>
+                           <span>Price</span>
+                        </div>
+                        {/* Receipt Items */}
+                        <div className="p-4 space-y-4">
+                           {order.items.map((item, idx) => (
+                               <div key={idx} className="flex justify-between items-start gap-4">
+                                   <div className="flex gap-3">
+                                       <div className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[10px] font-bold shrink-0">
+                                          {item.quantity}x
+                                       </div>
+                                       <div className="space-y-1">
+                                           <span className="text-sm font-semibold leading-none block">{item.product.name}</span>
+                                           {item.notes && (
+                                              <p className="text-xs text-muted-foreground italic">Note: {item.notes}</p>
+                                           )}
+                                       </div>
+                                   </div>
+                                   <span className="text-sm font-medium tabular-nums">
+                                      {formatMoney(item.product.price * item.quantity, currency)}
+                                   </span>
+                               </div>
+                           ))}
+                        </div>
+                        {/* Receipt Total */}
+                        <div className="bg-muted/30 p-4 border-t border-dashed border-border flex justify-between items-center">
+                           <span className="text-sm font-bold">Total Paid</span>
+                           <span className="text-lg font-bold text-primary">{formatMoney(orderTotal, currency)}</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
         </div>
-      </div>
-      <div className="space-y-3">
-        <h2 className="text-3xl font-extrabold tracking-tight">Order Received!</h2>
-        <p className="text-muted-foreground text-lg max-w-[260px] mx-auto leading-relaxed">
-          The kitchen has started preparing your food. Sit back and relax.
-        </p>
-      </div>
-      <Button variant="outline" size="lg" onClick={onReset} className="mt-8 min-w-[200px] rounded-full h-12 border-2">
-        Order Something Else
-      </Button>
-    </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
+           <Button 
+               className="w-full h-14 text-lg font-bold rounded-xl shadow-lg shadow-primary/10" 
+               variant={order.status === 'served' ? "default" : "secondary"}
+               onClick={onClose}
+            >
+              {order.status === 'served' ? "Place New Order" : "Browse Menu"}
+           </Button>
+        </div>
+
+      </DrawerContent>
+    </Drawer>
   )
 }
 

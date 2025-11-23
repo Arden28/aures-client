@@ -25,7 +25,17 @@ export type PortalCartItem = {
   tempId: string
   product: PortalProduct
   quantity: number
-  notes?: string
+  notes?: string // Added notes field
+}
+
+export type OrderStatus = 'received' | 'preparing' | 'ready' | 'served'
+
+export type ActiveOrder = {
+  id: number
+  items: PortalCartItem[]
+  status: OrderStatus
+  estimatedTime: string
+  timestamp: number
 }
 
 export type TableSession = {
@@ -36,7 +46,7 @@ export type TableSession = {
 }
 
 /* ------------------------ Mock Data ------------------------ */
-
+// ... (Categories and Products remain the same as your previous code) ...
 const MOCK_CATEGORIES: PortalCategory[] = [
   { id: 1, name: "Popular", slug: "popular" },
   { id: 2, name: "Starters", slug: "starters" },
@@ -113,9 +123,7 @@ const MOCK_PRODUCTS: PortalProduct[] = [
 /* --------------------------- API --------------------------- */
 
 export async function fetchPortalSession(tableCode: string): Promise<TableSession> {
-  // Simulate API delay
   await new Promise(resolve => setTimeout(resolve, 800))
-  
   return {
     id: "sess_123",
     table_name: "Table 12",
@@ -132,7 +140,31 @@ export async function fetchPortalMenu(tableCode: string) {
   }
 }
 
-export async function placePortalOrder(session: TableSession, items: PortalCartItem[]) {
+// CHANGED: Returns an ActiveOrder object now
+export async function placePortalOrder(session: TableSession, items: PortalCartItem[]): Promise<ActiveOrder> {
   await new Promise(resolve => setTimeout(resolve, 1500))
-  return { success: true, order_id: Math.floor(Math.random() * 10000) }
+  return { 
+    id: Math.floor(Math.random() * 10000),
+    items: [...items],
+    status: 'received',
+    estimatedTime: '15-20 mins',
+    timestamp: Date.now()
+  }
+}
+
+// NEW: Simulate WebSocket subscription
+export function subscribeToOrderUpdates(orderId: number, onUpdate: (status: OrderStatus) => void) {
+  const statuses: OrderStatus[] = ['received', 'preparing', 'ready', 'served']
+  let currentIndex = 0
+
+  const interval = setInterval(() => {
+    currentIndex++
+    if (currentIndex < statuses.length) {
+      onUpdate(statuses[currentIndex])
+    } else {
+      clearInterval(interval)
+    }
+  }, 4000) // Fast forward updates every 4 seconds for demo
+
+  return () => clearInterval(interval)
 }
