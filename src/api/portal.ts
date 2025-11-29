@@ -1,6 +1,8 @@
 import apiService from "@/api/apiService"
 
 /* -------------------------- Types -------------------------- */
+// (Keep your existing Types: PortalCategory, PortalProduct, etc.)
+export type OrderItemStatus = 'pending' | 'cooking' | 'ready' | 'served' | 'cancelled'
 
 export type PortalCategory = {
   id: number
@@ -15,20 +17,21 @@ export type PortalProduct = {
   name: string
   description: string
   price: number
-  image: string
+  image: string | null
   is_available: boolean
   is_popular?: boolean
-  calories?: number
 }
 
 export type PortalCartItem = {
-  tempId: string
+  tempId: string // Used for React keys
+  order_item_id?: number // Only exists if saved to DB
   product: PortalProduct
   quantity: number
-  notes?: string // Added notes field
+  notes?: string 
+  status?: OrderItemStatus // Used to lock UI
 }
 
-export type OrderStatus = 'received' | 'preparing' | 'ready' | 'served'
+export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'completed' | 'cancelled'
 
 export type ActiveOrder = {
   id: number
@@ -45,116 +48,44 @@ export type TableSession = {
   currency: string
 }
 
-/* ------------------------ Mock Data ------------------------ */
-// ... (Categories and Products remain the same as your previous code) ...
-const MOCK_CATEGORIES: PortalCategory[] = [
-  { id: 1, name: "Popular", slug: "popular" },
-  { id: 2, name: "Starters", slug: "starters" },
-  { id: 3, name: "Mains", slug: "mains" },
-  { id: 4, name: "Burgers", slug: "burgers" },
-  { id: 5, name: "Drinks", slug: "drinks" },
-  { id: 6, name: "Desserts", slug: "desserts" },
-]
-
-const MOCK_PRODUCTS: PortalProduct[] = [
-  {
-    id: 101,
-    category_id: 2,
-    name: "Crispy Calamari",
-    description: "Served with garlic aioli and lemon wedges.",
-    price: 1200,
-    image: "https://images.unsplash.com/photo-1604909052743-94e838986d24?auto=format&fit=crop&w=400&q=80",
-    is_available: true,
-    is_popular: true,
-    calories: 450
-  },
-  {
-    id: 102,
-    category_id: 4,
-    name: "Truffle Mushroom Burger",
-    description: "Double smashed patty, truffle mayo, swiss cheese, brioche bun.",
-    price: 1850,
-    image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=400&q=80",
-    is_available: true,
-    is_popular: true,
-    calories: 850
-  },
-  {
-    id: 103,
-    category_id: 3,
-    name: "Grilled Salmon",
-    description: "With asparagus, quinoa, and lemon butter sauce.",
-    price: 2400,
-    image: "https://images.unsplash.com/photo-1467003909585-2f8a7270028d?auto=format&fit=crop&w=400&q=80",
-    is_available: true,
-    calories: 620
-  },
-  {
-    id: 104,
-    category_id: 5,
-    name: "Iced Matcha Latte",
-    description: "Premium ceremonial grade matcha with oat milk.",
-    price: 650,
-    image: "https://images.unsplash.com/photo-1515823064-d6e0c04616a7?auto=format&fit=crop&w=400&q=80",
-    is_available: true,
-    calories: 120
-  },
-  {
-    id: 105,
-    category_id: 4,
-    name: "Classic Cheeseburger",
-    description: "Angus beef, cheddar, lettuce, tomato, house sauce.",
-    price: 1500,
-    image: "https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=400&q=80",
-    is_available: true
-  },
-  {
-    id: 106,
-    category_id: 6,
-    name: "Molten Chocolate Cake",
-    description: "Warm chocolate fondant with vanilla bean ice cream.",
-    price: 950,
-    image: "https://images.unsplash.com/photo-1624353365286-3f8d62daad51?auto=format&fit=crop&w=400&q=80",
-    is_available: true,
-    is_popular: true
-  }
-]
-
 /* --------------------------- API --------------------------- */
 
-export async function fetchPortalSession(tableCode: string): Promise<TableSession> {
-  await new Promise(resolve => setTimeout(resolve, 800))
-  return {
-    id: "sess_123",
-    table_name: "Table 12",
-    restaurant_name: "The Gourmet Spot",
-    currency: "KES"
-  }
+// We fetch everything in one call for performance, but export separate promises
+// to match the component structure if needed, or helper functions.
+
+export async function fetchPortalData(tableCode: string) {
+  const res = await apiService.get<any>(`/v1/portal/${tableCode}`)
+  return res.data
 }
 
-export async function fetchPortalMenu(tableCode: string) {
-  await new Promise(resolve => setTimeout(resolve, 600))
-  return {
-    categories: MOCK_CATEGORIES,
-    products: MOCK_PRODUCTS
-  }
-}
-
-// CHANGED: Returns an ActiveOrder object now
-export async function placePortalOrder(session: TableSession, items: PortalCartItem[]): Promise<ActiveOrder> {
-  await new Promise(resolve => setTimeout(resolve, 1500))
+// Create New
+export async function placePortalOrder(tableCode: string, items: PortalCartItem[]): Promise<ActiveOrder> {
+  const res = await apiService.post<any>(`/v1/portal/${tableCode}/order`, { items })
   return { 
-    id: Math.floor(Math.random() * 10000),
-    items: [...items],
-    status: 'received',
-    estimatedTime: '15-20 mins',
-    timestamp: Date.now()
+    id: res.data.id,
+    items: items, // Optimistic return, actual hydration happens on re-fetch usually
+    status: res.data.status,
+    estimatedTime: res.data.estimatedTime,
+    timestamp: res.data.timestamp
   }
 }
 
-// NEW: Simulate WebSocket subscription
+// Update Existing
+export async function updatePortalOrder(tableCode: string, orderId: number, items: PortalCartItem[]): Promise<ActiveOrder> {
+  const res = await apiService.put<any>(`/v1/portal/${tableCode}/order/${orderId}`, { items })
+  return { 
+    id: orderId,
+    items: items,
+    status: res.data.status,
+    estimatedTime: res.data.estimatedTime,
+    timestamp: res.data.timestamp
+  }
+}
+
+// WebSocket stub (Kept as simulation for now, requires Pusher/Reverb for real backend)
 export function subscribeToOrderUpdates(orderId: number, onUpdate: (status: OrderStatus) => void) {
-  const statuses: OrderStatus[] = ['received', 'preparing', 'ready', 'served']
+  // TODO: Replace with Laravel Reverb/Pusher
+  const statuses: OrderStatus[] = ['pending', 'preparing', 'ready', 'served', 'completed', 'cancelled']
   let currentIndex = 0
 
   const interval = setInterval(() => {
@@ -164,7 +95,7 @@ export function subscribeToOrderUpdates(orderId: number, onUpdate: (status: Orde
     } else {
       clearInterval(interval)
     }
-  }, 4000) // Fast forward updates every 4 seconds for demo
+  }, 10000) 
 
   return () => clearInterval(interval)
 }

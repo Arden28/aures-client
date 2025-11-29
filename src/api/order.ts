@@ -5,7 +5,7 @@ import apiService, { type ApiResult } from "@/api/apiService"
 
 export type OrderStatusValue =
   | "pending"
-  | "in_progress"
+  | 'preparing'
   | "ready"
   | "served"
   | "completed"
@@ -212,7 +212,7 @@ export async function deleteOrder(id: number) {
 /**
  * PATCH /v1/orders/{order}/status
  * Moves order along the state machine:
- * PENDING → IN_PROGRESS → READY → SERVED → COMPLETED / CANCELLED
+ * PENDING → PREPARING → READY → SERVED → COMPLETED / CANCELLED
  */
 export async function updateOrderStatus(
   id: number,

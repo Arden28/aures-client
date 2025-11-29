@@ -61,7 +61,7 @@ type OrderFormState = {
 
 const ORDER_STATUSES: OrderStatusValue[] = [
   "pending",
-  "in_progress",
+  'preparing',
   "ready",
   "served",
   "completed",
@@ -645,7 +645,7 @@ function formatOrderStatus(status: OrderStatusValue): string {
   switch (status) {
     case "pending":
       return "Pending"
-    case "in_progress":
+    case 'preparing':
       return "In progress"
     case "ready":
       return "Ready"
@@ -664,7 +664,7 @@ function orderStatusBadgeClass(status: OrderStatusValue): string {
   switch (status) {
     case "pending":
       return "border-amber-500/40 text-amber-600 bg-amber-500/5"
-    case "in_progress":
+    case 'preparing':
       return "border-sky-500/40 text-sky-600 bg-sky-500/5"
     case "ready":
       return "border-emerald-500/40 text-emerald-600 bg-emerald-500/5"

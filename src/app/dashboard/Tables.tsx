@@ -1,8 +1,9 @@
 // src/app/room/Tables.tsx
 import * as React from "react"
 import type { ColumnDef } from "@tanstack/react-table"
-import { MoreHorizontal, Edit2, Trash2 } from "lucide-react"
+import { MoreHorizontal, Edit2, Trash2, QrCode, Download } from "lucide-react"
 import { toast } from "sonner"
+import { QRCodeCanvas } from "qrcode.react"
 
 import { cn } from "@/lib/utils"
 import { DataTable } from "@/components/data-table"
@@ -47,7 +48,7 @@ import { fetchFloorPlans } from "@/api/floor"
 type TableFormState = {
   name: string
   capacity: string
-  floor_plan_id: string // "none" | "<id>"
+  floor_plan_id: string 
 }
 
 type FloorOption = {
@@ -74,6 +75,7 @@ export default function Tables() {
 
   const [floors, setFloors] = React.useState<FloorOption[]>([])
 
+  // --- CRUD Dialog State ---
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [dialogMode, setDialogMode] = React.useState<"create" | "edit">("create")
   const [editingTable, setEditingTable] = React.useState<Table | null>(null)
@@ -82,6 +84,12 @@ export default function Tables() {
     capacity: "",
     floor_plan_id: "none",
   })
+  
+  // --- QR Dialog State ---
+  const [isQrOpen, setIsQrOpen] = React.useState(false)
+  const [qrTable, setQrTable] = React.useState<Table | null>(null)
+  const [qrBaseUrl, setQrBaseUrl] = React.useState("https://aures-restaurant.vercel.app/portal")
+  
   const [saving, setSaving] = React.useState(false)
 
   const load = React.useCallback(async () => {
@@ -159,6 +167,27 @@ export default function Tables() {
     })
     setIsDialogOpen(true)
   }
+
+  // Open the dedicated QR Dialog
+  function openQrDialog(table: Table) {
+    setQrTable(table)
+    setIsQrOpen(true)
+  }
+
+  // Function to download QR as PNG
+  const downloadQRCode = () => {
+    const canvas = document.getElementById("qr-gen") as HTMLCanvasElement;
+    if (canvas && qrTable) {
+      const pngUrl = canvas.toDataURL("image/png");
+      const downloadLink = document.createElement("a");
+      downloadLink.href = pngUrl;
+      downloadLink.download = `qr-${qrTable.code}.png`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      toast.success("QR Code downloaded")
+    }
+  };
 
   async function handleDelete(table: Table) {
     if (!confirm(`Delete table "${table.name}"?`)) return
@@ -300,6 +329,11 @@ export default function Tables() {
                     <Edit2 className="mr-2 h-3 w-3" />
                     Edit
                   </DropdownMenuItem>
+                  {/* NEW QR MENU ITEM */}
+                  <DropdownMenuItem onClick={() => openQrDialog(table)}>
+                    <QrCode className="mr-2 h-3 w-3" />
+                    QR Code
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => handleDelete(table)}
@@ -333,46 +367,27 @@ export default function Tables() {
 
       {/* Filters row */}
       <div className="flex flex-wrap gap-3 text-[12px]">
-        <div className="flex items-center gap-2">
-          <Label className="text-[11px] text-muted-foreground">Status</Label>
-          <Select
-            value={statusFilter}
-            onValueChange={(value: StatusFilter) => setStatusFilter(value)}
-          >
-            <SelectTrigger className="h-8 w-[160px] rounded-sm border-muted-foreground/30 text-[12px]">
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              {STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Label className="text-[11px] text-muted-foreground">Floor</Label>
-          <Select
-            value={floorFilter}
-            onValueChange={(value) => setFloorFilter(value)}
-          >
-            <SelectTrigger className="h-8 w-[160px] rounded-sm border-muted-foreground/30 text-[12px]">
-              <SelectValue placeholder="All floors" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All floors</SelectItem>
-              <SelectItem value="none">No floor</SelectItem>
-              {floors.map((f) => (
-                <SelectItem key={f.id} value={String(f.id)}>
-                  {f.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+         <div className="flex items-center gap-2">
+           <Label className="text-[11px] text-muted-foreground">Status</Label>
+           <Select value={statusFilter} onValueChange={(v:any) => setStatusFilter(v)}>
+             <SelectTrigger className="h-8 w-[160px] rounded-sm text-[12px]"><SelectValue placeholder="All" /></SelectTrigger>
+             <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+             </SelectContent>
+           </Select>
+         </div>
+         <div className="flex items-center gap-2">
+           <Label className="text-[11px] text-muted-foreground">Floor</Label>
+           <Select value={floorFilter} onValueChange={setFloorFilter}>
+             <SelectTrigger className="h-8 w-[160px] rounded-sm text-[12px]"><SelectValue placeholder="All" /></SelectTrigger>
+             <SelectContent>
+                <SelectItem value="all">All floors</SelectItem>
+                <SelectItem value="none">No floor</SelectItem>
+                {floors.map(f => <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>)}
+             </SelectContent>
+           </Select>
+         </div>
       </div>
 
       {/* DataTable */}
@@ -385,46 +400,46 @@ export default function Tables() {
         onSearchChange={handleSearchChange}
       />
 
-      {/* Create / Edit Dialog */}
+      {/* 1. Create / Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-md max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {dialogMode === "create" ? "Add table" : "Edit table"}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Configure the table name, its seating capacity and the floor it
-              belongs to.
+              Configure table details.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={form.name}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, name: e.target.value }))
-                }
-                placeholder="e.g. T1, Window Table, VIP 3"
-                required
-              />
-            </div>
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="name">Name</Label>
+                    <Input
+                        id="name"
+                        value={form.name}
+                        onChange={(e) =>
+                        setForm((prev) => ({ ...prev, name: e.target.value }))
+                        }
+                        placeholder="e.g. T1"
+                        required
+                    />
+                </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="capacity">Capacity</Label>
-              <Input
-                id="capacity"
-                type="number"
-                min={1}
-                value={form.capacity}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, capacity: e.target.value }))
-                }
-                placeholder="Number of guests"
-                required
-              />
+                <div className="space-y-2">
+                    <Label htmlFor="capacity">Capacity</Label>
+                    <Input
+                        id="capacity"
+                        type="number"
+                        min={1}
+                        value={form.capacity}
+                        onChange={(e) =>
+                        setForm((prev) => ({ ...prev, capacity: e.target.value }))
+                        }
+                        required
+                    />
+                </div>
             </div>
 
             <div className="space-y-2">
@@ -436,7 +451,7 @@ export default function Tables() {
                 }
               >
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select floor (optional)" />
+                  <SelectValue placeholder="Select floor" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No floor</SelectItem>
@@ -447,25 +462,7 @@ export default function Tables() {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-[11px] text-muted-foreground">
-                Assigning a floor helps visualize tables in your floor plan
-                view.
-              </p>
             </div>
-
-            {dialogMode === "edit" && editingTable && (
-              <div className="rounded-md border bg-muted/40 px-3 py-2">
-                <p className="text-[11px] text-muted-foreground">
-                  Code: <span className="font-mono">{editingTable.code}</span>
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  QR token:{" "}
-                  <span className="font-mono break-all">
-                    {editingTable.qr_token}
-                  </span>
-                </p>
-              </div>
-            )}
 
             <DialogFooter className="mt-2">
               <Button
@@ -487,6 +484,62 @@ export default function Tables() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 2. QR Code Generator Dialog */}
+      <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>
+        <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                    <QrCode className="h-5 w-5" />
+                    QR Code: {qrTable?.name}
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                   Generate and download the QR code for table <strong>{qrTable?.code}</strong>.
+                </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex flex-col gap-6 py-4">
+                {/* Inputs */}
+                <div className="space-y-2">
+                     <Label htmlFor="qrBaseUrl" className="text-xs">Base URL</Label>
+                     <Input 
+                        id="qrBaseUrl"
+                        value={qrBaseUrl}
+                        onChange={(e) => setQrBaseUrl(e.target.value)}
+                        className="h-8 text-xs font-mono"
+                        placeholder="https://your-domain.com/menu"
+                    />
+                    <p className="text-[10px] text-muted-foreground bg-muted/30 p-2 rounded border font-mono break-all">
+                        {qrBaseUrl}?table={qrTable?.code}
+                    </p>
+                </div>
+
+                {/* Preview & Download */}
+                <div className="flex flex-row items-center gap-6 justify-center rounded-lg border bg-slate-50 p-6">
+                     <div className="bg-white p-2 rounded border shadow-sm">
+                        {qrTable && (
+                            <QRCodeCanvas
+                                id="qr-gen"
+                                value={`${qrBaseUrl}?table=${qrTable.code}`}
+                                size={150}
+                                level={"H"}
+                                includeMargin={true}
+                            />
+                        )}
+                     </div>
+                     <div className="flex flex-col gap-2">
+                        <Button onClick={downloadQRCode} className="w-full gap-2">
+                            <Download className="h-4 w-4" />
+                            Download
+                        </Button>
+                        <Button variant="outline" onClick={() => setIsQrOpen(false)}>
+                            Close
+                        </Button>
+                     </div>
+                </div>
+            </div>
         </DialogContent>
       </Dialog>
     </div>

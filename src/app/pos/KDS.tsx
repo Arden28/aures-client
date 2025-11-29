@@ -38,9 +38,9 @@ import { toast } from "sonner"
 /* Types & Config                                                             */
 /* -------------------------------------------------------------------------- */
 
-const KDS_COLUMNS: { id: OrderStatusValue | "in_progress"; label: string; color: string; icon: any }[] = [
+const KDS_COLUMNS: { id: OrderStatusValue | 'preparing'; label: string; color: string; icon: any }[] = [
   { id: "pending", label: "Pending", color: "text-slate-500", icon: AlertCircle },
-  { id: "in_progress", label: "Cooking", color: "text-blue-500", icon: ChefHat },
+  { id: 'preparing', label: "Cooking", color: "text-blue-500", icon: ChefHat },
   { id: "ready", label: "Ready", color: "text-emerald-500", icon: CheckCircle2 },
   { id: "served", label: "Served", color: "text-indigo-500", icon: UtensilsCrossed },
   { id: "cancelled", label: "Cancelled", color: "text-red-500", icon: XCircle },
@@ -271,7 +271,7 @@ function KDSTicket({ order, onMove }: { order: Order, onMove: (id: number, s: Or
         "hover:shadow-md hover:border-primary/30 cursor-grab active:cursor-grabbing",
         // Status border indicator
         order.status === 'pending' && "border-l-[6px] border-l-slate-400",
-        order.status === 'in_progress' && "border-l-[6px] border-l-blue-500",
+        order.status === 'preparing' && "border-l-[6px] border-l-blue-500",
         order.status === 'ready' && "border-l-[6px] border-l-emerald-500",
         order.status === 'cancelled' && "border-l-[6px] border-l-red-500 opacity-70 grayscale-[0.8]",
         "bg-card border-border" // Fallback/Base
@@ -354,7 +354,7 @@ function KDSTicket({ order, onMove }: { order: Order, onMove: (id: number, s: Or
                </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-               <DropdownMenuItem onClick={() => onMove(order.id, "in_progress")}>Start Cooking</DropdownMenuItem>
+               <DropdownMenuItem onClick={() => onMove(order.id, 'preparing')}>Start Cooking</DropdownMenuItem>
                <DropdownMenuItem onClick={() => onMove(order.id, "ready")}>Mark Ready</DropdownMenuItem>
                <DropdownMenuItem onClick={() => onMove(order.id, "served")}>Complete</DropdownMenuItem>
                <DropdownMenuItem onClick={() => onMove(order.id, "cancelled")} className="text-red-500 focus:text-red-600">

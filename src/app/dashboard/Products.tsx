@@ -1,7 +1,14 @@
 // src/app/menu/Products.tsx
 import * as React from "react"
 import type { ColumnDef } from "@tanstack/react-table"
-import { MoreHorizontal, Edit2, Trash2, Image as ImageIcon } from "lucide-react"
+import { 
+  MoreHorizontal, 
+  Edit2, 
+  Trash2, 
+  Image as ImageIcon, 
+  UploadCloud, // Added for empty state
+  ImagePlus // Added for hover state
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -46,9 +53,21 @@ import {
 } from "@/api/product"
 import { fetchCategories } from "@/api/category"
 
+// --- HELPERS ---
+
+const BACKEND_STORAGE_URL = "http://localhost:8000/storage/"
+
+function getImageUrl(path: string | null | undefined) {
+  if (!path) return null
+  if (path.startsWith("http")) return path
+  return `${BACKEND_STORAGE_URL}${path}`
+}
+
+// --- TYPES ---
+
 type ProductFormState = {
   name: string
-  category_id: string // "none" | "<id>"
+  category_id: string 
   price: string
   description: string
   is_available: boolean
@@ -191,7 +210,7 @@ export default function Products() {
       description: product.description ?? "",
       is_available: product.is_available,
     })
-    resetImageState(product.image_path ?? null)
+    resetImageState(getImageUrl(product.image_path))
     setIsDialogOpen(true)
   }
 
@@ -213,7 +232,7 @@ export default function Products() {
     if (!file) {
       setImageFile(null)
       // Keep existing image if editing
-      setImagePreview(editingProduct?.image_path ?? null)
+      setImagePreview(editingProduct?.image_path ? getImageUrl(editingProduct.image_path) : null)
       return
     }
 
@@ -264,19 +283,15 @@ export default function Products() {
 
       if (dialogMode === "create") {
         saved = await createProduct(payload)
-
         if (imageFile) {
           saved = await uploadProductImage(saved.id, imageFile)
         }
-
         toast.success("Product created.")
       } else if (dialogMode === "edit" && editingProduct) {
         saved = await updateProduct(editingProduct.id, payload)
-
         if (imageFile) {
           saved = await uploadProductImage(editingProduct.id, imageFile)
         }
-
         toast.success("Product updated.")
       } else {
         return
@@ -402,47 +417,32 @@ export default function Products() {
 
       {/* Filters row */}
       <div className="flex flex-wrap gap-2 text-[12px]">
+        {/* ... (Existing Filters) ... */}
+        {/* Keeping filters exactly as they were */}
         <div className="flex items-center gap-2">
-          <Label className="text-[11px] text-muted-foreground">Category</Label>
-          <Select
-            value={categoryFilter}
-            onValueChange={handleCategoryFilterChange}
-          >
-            <SelectTrigger className="h-8 w-[160px] rounded-sm border-muted-foreground/30 text-[12px]">
-              <SelectValue placeholder="All categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All categories</SelectItem>
-              {categories.map((cat) => (
-                <SelectItem key={cat.id} value={String(cat.id)}>
-                  {cat.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <Label className="text-[11px] text-muted-foreground">Category</Label>
+            <Select value={categoryFilter} onValueChange={handleCategoryFilterChange}>
+                <SelectTrigger className="h-8 w-[160px] rounded-sm border-muted-foreground/30 text-[12px]"><SelectValue placeholder="All categories" /></SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">All categories</SelectItem>
+                    {categories.map((cat) => <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>)}
+                </SelectContent>
+            </Select>
         </div>
-
         <div className="flex items-center gap-2">
-          <Label className="text-[11px] text-muted-foreground">Availability</Label>
-          <Select
-            value={availabilityFilter}
-            onValueChange={(v: "all" | "available" | "unavailable") =>
-              handleAvailabilityFilterChange(v)
-            }
-          >
-            <SelectTrigger className="h-8 w-[140px] rounded-sm border-muted-foreground/30 text-[12px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="available">Available</SelectItem>
-              <SelectItem value="unavailable">Unavailable</SelectItem>
-            </SelectContent>
-          </Select>
+            <Label className="text-[11px] text-muted-foreground">Availability</Label>
+            <Select value={availabilityFilter} onValueChange={(v:any) => handleAvailabilityFilterChange(v)}>
+                <SelectTrigger className="h-8 w-[140px] rounded-sm border-muted-foreground/30 text-[12px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="available">Available</SelectItem>
+                    <SelectItem value="unavailable">Unavailable</SelectItem>
+                </SelectContent>
+            </Select>
         </div>
       </div>
 
-      {/* DataTable with thumbnails */}
+      {/* DataTable */}
       <DataTable<Product>
         columns={columns}
         data={data}
@@ -450,14 +450,14 @@ export default function Products() {
         totalLabel="products"
         searchPlaceholder="Search products..."
         onSearchChange={handleSearchChange}
-        getImageSrc={(p) => p.image_path || null}
+        getImageSrc={(p) => getImageUrl(p.image_path)}
         getImageAlt={(p) => p.name}
         imageColumnHeader=""
       />
 
       {/* Create / Edit Product Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-md max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {dialogMode === "create" ? "Add product" : "Edit product"}
@@ -468,43 +468,48 @@ export default function Products() {
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-            {/* Image upload + preview */}
+            
+            {/* NEW: Improved Image Upload Section */}
             <div className="space-y-2">
-              <Label>Image</Label>
-              <div className="flex items-start gap-3">
-                <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-md bg-muted text-[11px] text-muted-foreground">
-                  {imagePreview ? (
-                    <img
-                      src={imagePreview}
-                      alt={form.name || "Product image"}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center gap-1">
-                      <ImageIcon className="h-4 w-4" />
-                      <span>No image</span>
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-1 text-xs text-muted-foreground">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
+                <Label>Image</Label>
+                <div 
                     onClick={() => fileInputRef.current?.click()}
-                  >
-                    {imagePreview ? "Change image" : "Upload image"}
-                  </Button>
-                  <p>PNG or JPG, up to {MAX_IMAGE_SIZE_MB}MB.</p>
+                    className="group relative flex h-40 w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-lg border-2 border-dashed border-muted-foreground/25 bg-muted/5 transition-all hover:bg-muted/10 hover:border-muted-foreground/50"
+                >
+                    {imagePreview ? (
+                        <>
+                            <img 
+                                src={imagePreview} 
+                                alt="Preview" 
+                                className="h-full w-full object-cover transition-opacity group-hover:opacity-75"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                                <div className="flex items-center gap-2 rounded-full bg-background/80 px-4 py-2 text-sm font-medium text-foreground backdrop-blur-sm shadow-sm">
+                                    <ImagePlus className="h-4 w-4" />
+                                    Change Image
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center gap-2 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted shadow-sm ring-1 ring-muted-foreground/10">
+                                <UploadCloud className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                            <div className="space-y-0.5">
+                                <p className="text-sm font-medium text-foreground">Click to upload image</p>
+                                <p className="text-[11px] text-muted-foreground">PNG, JPG up to {MAX_IMAGE_SIZE_MB}MB</p>
+                            </div>
+                        </div>
+                    )}
                 </div>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleImageChange}
-              />
+                {/* Hidden Input remains the same */}
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleImageChange}
+                />
             </div>
 
             <div className="space-y-2">
@@ -542,20 +547,33 @@ export default function Products() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="price">Price</Label>
-              <Input
-                id="price"
-                type="number"
-                min={0}
-                step="0.01"
-                value={form.price}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, price: e.target.value }))
-                }
-                placeholder="e.g. 500"
-                required
-              />
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="price">Price</Label>
+                    <Input
+                        id="price"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={form.price}
+                        onChange={(e) =>
+                        setForm((prev) => ({ ...prev, price: e.target.value }))
+                        }
+                        placeholder="e.g. 500"
+                        required
+                    />
+                </div>
+                 <div className="flex flex-col justify-end pb-2">
+                    <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 h-10">
+                        <span className="text-xs font-medium">Available</span>
+                        <Switch
+                            checked={form.is_available}
+                            onCheckedChange={(checked) =>
+                            setForm((prev) => ({ ...prev, is_available: checked }))
+                            }
+                        />
+                    </div>
+                </div>
             </div>
 
             <div className="space-y-2">
@@ -570,22 +588,6 @@ export default function Products() {
                   }))
                 }
                 placeholder="Short description shown in the menu"
-              />
-            </div>
-
-            <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
-              <div className="space-y-0.5">
-                <Label className="text-xs">Available</Label>
-                <p className="text-[11px] text-muted-foreground">
-                  Unavailable products stay in the system but are hidden from the
-                  client menu.
-                </p>
-              </div>
-              <Switch
-                checked={form.is_available}
-                onCheckedChange={(checked) =>
-                  setForm((prev) => ({ ...prev, is_available: checked }))
-                }
               />
             </div>
 

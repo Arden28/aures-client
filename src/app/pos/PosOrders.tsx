@@ -441,7 +441,7 @@ export default function PosOrders() {
                        
                        <button 
                           className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg flex flex-col items-center justify-center gap-1 transition-colors active:scale-[0.98]"
-                          onClick={() => handleStatusUpdate("in_progress")}
+                          onClick={() => handleStatusUpdate('preparing')}
                        >
                           <ChefHat className="h-5 w-5" />
                           <span className="text-[10px] uppercase font-bold">Send to Kitchen</span>
@@ -450,7 +450,7 @@ export default function PosOrders() {
                 ) : (
                     /* --- ACTION MODE (Locked) --- */
                     <div className="p-4 bg-card grid grid-cols-2 gap-4 h-[140px] items-center border-t border-border">
-                        {selectedOrder.status === 'in_progress' && (
+                        {selectedOrder.status === 'preparing' && (
                              <Button 
                                 className="w-full h-12 text-base bg-emerald-600 hover:bg-emerald-700 text-white col-span-2 shadow-sm"
                                 onClick={() => handleStatusUpdate('ready')}
@@ -604,7 +604,7 @@ function CartRow({ item, selected, onClick, onRemove, isEditable }: { item: Cart
 function StatusBadge({ status, mini }: { status: string, mini?: boolean }) {
   const styles = {
     pending: "bg-slate-100 text-slate-700 dark:bg-slate-900/50 dark:text-slate-300 border-slate-200 dark:border-slate-700",
-    in_progress: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200 dark:border-blue-800",
+    PREPARING: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200 dark:border-blue-800",
     ready: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border-amber-200 dark:border-amber-800",
     served: "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800",
     completed: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",

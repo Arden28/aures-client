@@ -30,6 +30,7 @@ export type ProductPayload = {
   is_available?: boolean
   sku?: string | null
   position?: number | null
+  image?: File | null // Added this
 }
 
 export type ProductFilters = {

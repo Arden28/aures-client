@@ -3,21 +3,8 @@
 import * as React from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { 
-  ShoppingBag, 
-  Minus, 
-  Plus, 
-  ChevronRight, 
-  ChevronLeft,
-  Search, 
-  Flame, 
-  CheckCircle2,
-  X,
-  ChefHat,
-  Clock,
-  Utensils,
-  BellRing,
-  Receipt,
-  MapPin
+  ShoppingBag, Minus, Plus, ChevronRight, ChevronLeft, Search, 
+  Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt, Lock
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -25,20 +12,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
+  Drawer, DrawerClose, DrawerContent, DrawerHeader, DrawerTitle,
 } from "@/components/ui/drawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs" // Assuming you have shadcn tabs, otherwise I simulate them
 
 import { 
-  fetchPortalMenu, 
-  fetchPortalSession, 
+  fetchPortalData,
   placePortalOrder,
+  updatePortalOrder,
   subscribeToOrderUpdates,
   type PortalCategory, 
   type PortalProduct, 
@@ -47,20 +29,26 @@ import {
   type ActiveOrder,
   type OrderStatus
 } from "@/api/portal"
+import { useSearchParams } from "react-router-dom"
 
 /* -------------------------------------------------------------------------- */
 /* Main Component                                                             */
 /* -------------------------------------------------------------------------- */
 
 export default function PortalPage() {
+  const [searchParams] = useSearchParams()
+  const tableCode = searchParams.get("table")
+
   // -- State
   const [isLoading, setIsLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
+
   const [session, setSession] = React.useState<TableSession | null>(null)
   const [categories, setCategories] = React.useState<PortalCategory[]>([])
   const [products, setProducts] = React.useState<PortalProduct[]>([])
   const [activeCategory, setActiveCategory] = React.useState("popular")
   
-  // Cart State
+  // Cart State (Represents the "Proposed" or "Current" Order state)
   const [cart, setCart] = React.useState<PortalCartItem[]>([])
   const [isCartOpen, setIsCartOpen] = React.useState(false)
   const [isOrdering, setIsOrdering] = React.useState(false)
@@ -80,34 +68,49 @@ export default function PortalPage() {
   const [canScrollRight, setCanScrollRight] = React.useState(true)
 
   // -- Derived
-  const currency = session?.currency || "KES"
+  const currency = session?.currency || "USD"
   const cartTotal = cart.reduce((acc, item) => acc + (item.product.price * item.quantity), 0)
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0)
+  
+  // Helper to check if item is locked (already sent to kitchen)
+  const isLocked = (status?: string) => status && status !== 'pending';
 
   // -- Init
   React.useEffect(() => {
     async function load() {
+      if (!tableCode) {
+        setError("No table code provided. Please scan the QR code again.")
+        setIsLoading(false)
+        return
+      }
+
       try {
-        const tableCode = "table_123" 
-        const [sessData, menuData] = await Promise.all([
-          fetchPortalSession(tableCode),
-          fetchPortalMenu(tableCode)
-        ])
-        setSession(sessData)
-        setCategories(menuData.categories)
-        setProducts(menuData.products)
+        // Fetch everything from backend
+        const data = await fetchPortalData(tableCode)
+        
+        setSession(data.session)
+        setCategories(data.menu.categories)
+        setProducts(data.menu.products)
+        
+        // **HYDRATION MAGIC**
+        if (data.active_order) {
+            setActiveOrder(data.active_order)
+            setCart(data.active_order.items)
+        }
+
       } catch (e) {
-        toast.error("Could not load menu")
+        console.error(e)
+        setError("Invalid or expired table code.")
       } finally {
         setIsLoading(false)
       }
     }
     load()
-  }, [])
+  }, [tableCode])
 
   // -- Order Subscription Logic
   React.useEffect(() => {
-    if (activeOrder && activeOrder.status !== 'served') {
+    if (activeOrder && activeOrder.status !== 'served' && activeOrder.status !== 'completed') {
       const unsubscribe = subscribeToOrderUpdates(activeOrder.id, (newStatus) => {
         setActiveOrder(prev => prev ? { ...prev, status: newStatus } : null)
         if (newStatus === 'served') {
@@ -148,60 +151,148 @@ export default function PortalPage() {
 
 
   // -- Handlers
+
   const handleAddToCart = () => {
     if (!selectedProduct) return
     
     setCart(prev => {
-      const existing = prev.find(i => i.product.id === selectedProduct.id && i.notes === tempNotes)
-      if (existing) {
-        return prev.map(i => (i.product.id === selectedProduct.id && i.notes === tempNotes)
-          ? { ...i, quantity: i.quantity + tempQty } 
-          : i
-        )
+      // Check if item exists (matching ID, notes, and is pending)
+      const existingIndex = prev.findIndex(i => 
+        i.product.id === selectedProduct.id && 
+        i.notes === tempNotes && 
+        (!i.status || i.status === 'pending')
+      )
+      
+      if (existingIndex >= 0) {
+        // IMMUTABLE UPDATE: Create copy of array AND the specific item
+        const newCart = [...prev]
+        newCart[existingIndex] = { 
+            ...newCart[existingIndex], 
+            quantity: newCart[existingIndex].quantity + tempQty 
+        }
+        return newCart
       }
+      
+      // Add new item
       return [...prev, { 
         tempId: crypto.randomUUID(), 
         product: selectedProduct, 
         quantity: tempQty,
-        notes: tempNotes 
+        notes: tempNotes,
+        status: 'pending' 
       }]
     })
     
-    toast.success(`Added ${tempQty}x ${selectedProduct.name}`)
+    toast.success(`Added ${selectedProduct.name}`)
     setSelectedProduct(null)
     setTempQty(1)
     setTempNotes("") 
   }
 
-  const handlePlaceOrder = async () => {
-    if (!session) return
+  const handleRemoveItem = (itemIndex: number) => {
+      const item = cart[itemIndex]
+      
+      if (isLocked(item.status)) {
+          toast.error("Cannot remove items that are preparing.")
+          return 
+      }
+      
+      setCart(prev => prev.filter((_, i) => i !== itemIndex))
+  }
+
+  const handleDecrement = (itemIndex: number) => {
+      const item = cart[itemIndex]
+      
+      if (isLocked(item.status)) {
+           toast.error("Item is already preparing.")
+           return 
+      }
+
+      if (item.quantity > 1) {
+          setCart(prev => {
+              const newCart = [...prev]
+              // IMMUTABLE UPDATE: Create copy of the specific item
+              newCart[itemIndex] = { 
+                  ...newCart[itemIndex], 
+                  quantity: newCart[itemIndex].quantity - 1 
+              }
+              return newCart
+          })
+      } else {
+          handleRemoveItem(itemIndex)
+      }
+  }
+
+  const handleIncrement = (itemIndex: number) => {
+    const item = cart[itemIndex]
+    
+    if (isLocked(item.status)) {
+         return 
+    }
+
+    setCart(prev => {
+        const newCart = [...prev]
+        // IMMUTABLE UPDATE: Create copy of the specific item
+        newCart[itemIndex] = { 
+            ...newCart[itemIndex], 
+            quantity: newCart[itemIndex].quantity + 1 
+        }
+        return newCart
+    })
+  }
+
+  const handleOrderSubmission = async () => {
+    if (!session || !tableCode) return
     setIsOrdering(true)
     try {
-      const newOrder = await placePortalOrder(session, cart)
-      setActiveOrder(newOrder)
-      setIsTrackerOpen(true) 
-      setCart([]) 
+      let result: ActiveOrder;
+
+      if (activeOrder) {
+          // UPDATE MODE
+          result = await updatePortalOrder(tableCode, activeOrder.id, cart)
+          toast.success("Order updated successfully!")
+      } else {
+          // CREATE MODE
+          result = await placePortalOrder(tableCode, cart)
+          toast.success("Order placed successfully!")
+      }
+
+      setActiveOrder(result)
       setIsCartOpen(false)
-    } catch (e) {
-      toast.error("Failed to place order")
+      setIsTrackerOpen(true)
+
+    } catch (e: any) {
+      console.error(e)
+      toast.error(e.message || "Failed to submit order.")
     } finally {
       setIsOrdering(false)
     }
   }
 
   const filteredProducts = React.useMemo(() => {
-    if (activeCategory === "popular") {
-      return products.filter(p => p.is_popular)
-    }
+    if (activeCategory === "popular") return products.filter(p => p.is_popular)
     const catId = categories.find(c => c.slug === activeCategory)?.id
     return products.filter(p => p.category_id === catId)
   }, [products, activeCategory, categories])
 
-  // -- Render Loading
+  // -- Render States
   if (isLoading) return <PortalSkeleton />
+  
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center space-y-4">
+         <div className="bg-red-50 p-4 rounded-full">
+            <X className="h-8 w-8 text-red-500" />
+         </div>
+         <h1 className="text-2xl font-bold">Oops!</h1>
+         <p className="text-muted-foreground">{error}</p>
+         <Button variant="outline" onClick={() => window.location.reload()}>Try Again</Button>
+      </div>
+    )
+  }
 
   return (
-    <div className="relative min-h-[calc(100vh-4rem)] pb-36"> {/* Increased padding bottom to accommodate stacked buttons */}
+    <div className="relative min-h-[calc(100vh-4rem)] pb-36"> 
       
       {/* 1. Hero / Welcome */}
       <div className="px-6 py-8 md:py-12 text-center md:text-left space-y-2 max-w-3xl mx-auto">
@@ -212,6 +303,12 @@ export default function PortalPage() {
           You are seated at <span className="font-medium text-foreground">{session?.table_name}</span>. 
           Ready to order?
         </p>
+        {activeOrder && (
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full text-xs font-bold uppercase tracking-wider mt-2">
+                <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                Active Order Open
+            </div>
+        )}
       </div>
 
       {/* 2. Search Bar */}
@@ -226,7 +323,7 @@ export default function PortalPage() {
       </div>
 
       {/* 3. Categories */}
-      <div className="sticky top-[4rem] z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-border/40 py-2">
+      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-border/40 py-2">
         <div className="relative max-w-7xl mx-auto px-2 md:px-6 flex items-center">
           <div className={cn(
             "hidden md:flex absolute left-0 top-0 bottom-0 w-24 bg-gradient-to-r from-background to-transparent z-10 items-center justify-start pl-4 transition-opacity duration-300",
@@ -242,6 +339,19 @@ export default function PortalPage() {
             className="flex w-full overflow-x-auto gap-2 p-2 px-4 scrollbar-hide snap-x snap-mandatory"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
+             <button
+               onClick={() => setActiveCategory("popular")}
+               className={cn(
+                 "snap-start flex-shrink-0 flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition-all duration-300 ease-out select-none border",
+                 activeCategory === "popular"
+                   ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/25 scale-100"
+                   : "bg-card text-muted-foreground border-border/40 hover:bg-accent hover:text-foreground hover:border-border"
+               )}
+             >
+               <Flame className={cn("h-4 w-4", activeCategory === "popular" ? "text-white fill-white" : "text-orange-500 fill-orange-500")} />
+               Popular
+             </button>
+
             {categories.map((cat) => (
               <button
                 key={cat.id}
@@ -253,7 +363,6 @@ export default function PortalPage() {
                     : "bg-card text-muted-foreground border-border/40 hover:bg-accent hover:text-foreground hover:border-border"
                 )}
               >
-                {cat.slug === "popular" && <Flame className={cn("h-4 w-4", activeCategory === cat.slug ? "text-white fill-white" : "text-orange-500 fill-orange-500")} />}
                 {cat.name}
               </button>
             ))}
@@ -284,11 +393,18 @@ export default function PortalPage() {
               className="group relative flex sm:flex-col gap-4 p-3 md:p-4 rounded-3xl border border-border/40 bg-card/50 hover:bg-card hover:border-primary/20 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 cursor-pointer overflow-hidden"
             >
               <div className="relative h-28 w-28 sm:h-48 sm:w-full shrink-0 overflow-hidden rounded-2xl bg-muted">
-                <img 
-                  src={product.image} 
-                  alt={product.name}
-                  className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
-                />
+                {product.image ? (
+                   <img 
+                    src={product.image} 
+                    alt={product.name}
+                    className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  />
+                ) : (
+                   <div className="h-full w-full flex items-center justify-center bg-muted text-muted-foreground">
+                      <Utensils className="h-8 w-8" />
+                   </div>
+                )}
+               
                 {product.is_popular && (
                   <div className="absolute left-2 top-2 rounded-full bg-orange-500/90 backdrop-blur-sm px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
                     POPULAR
@@ -318,34 +434,33 @@ export default function PortalPage() {
         </div>
       </div>
 
-      {/* 5. Active Order Tracker Pill (Dynamic Positioning) */}
+      {/* 5. Active Order Tracker Pill */}
       <AnimatePresence>
         {activeOrder && !isTrackerOpen && (
           <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            // Logic: If cart has items, push this pill up to bottom-24, otherwise bottom-6
             className={cn(
                 "fixed right-4 sm:right-6 z-40 transition-all duration-500 ease-in-out",
                 cartCount > 0 ? "bottom-24" : "bottom-6"
             )}
           >
              <Button 
-                onClick={() => setIsTrackerOpen(true)}
-                className="h-14 pl-2 pr-6 rounded-full bg-card border-2 border-primary/20 shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-105 transition-all flex items-center gap-3"
+               onClick={() => setIsTrackerOpen(true)}
+               className="h-14 pl-2 pr-6 rounded-full bg-card border-2 border-primary/20 shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-105 transition-all flex items-center gap-3"
              >
-                <div className="relative h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
-                  <BellRing className="h-5 w-5 text-primary" />
-                  <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-500 rounded-full animate-pulse border-2 border-white" />
-                </div>
-                <div className="flex flex-col items-start text-xs">
+               <div className="relative h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
+                 <BellRing className="h-5 w-5 text-primary" />
+                 <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-500 rounded-full animate-pulse border-2 border-white" />
+               </div>
+               <div className="flex flex-col items-start text-xs">
                    <span className="font-bold text-sm text-foreground">Order #{activeOrder.id}</span>
                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      <span className="capitalize">{activeOrder.status}</span>
+                     <span className={cn("h-1.5 w-1.5 rounded-full", activeOrder.status === 'served' ? "bg-green-500" : "bg-orange-500")} />
+                     <span className="capitalize">{activeOrder.status}</span>
                    </div>
-                </div>
+               </div>
              </Button>
           </motion.div>
         )}
@@ -371,8 +486,8 @@ export default function PortalPage() {
                     {cartCount}
                   </div>
                   <div className="flex flex-col items-start text-xs">
-                    <span className="font-bold text-base">View Order</span>
-                    <span className="opacity-80 font-normal">Finish your meal</span>
+                    <span className="font-bold text-base">{activeOrder ? "Update Order" : "View Order"}</span>
+                    <span className="opacity-80 font-normal">{activeOrder ? "Modify items" : "Finish your meal"}</span>
                   </div>
                 </div>
                 <span className="font-bold text-xl tracking-tight">
@@ -391,11 +506,13 @@ export default function PortalPage() {
             <div className="mx-auto w-full flex-1 overflow-y-auto rounded-t-[inherit]">
               <div className="p-0 relative">
                 <div className="relative h-64 sm:h-80 w-full overflow-hidden rounded-t-[inherit] bg-muted">
-                  <img 
-                    src={selectedProduct.image} 
-                    alt={selectedProduct.name}
-                    className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
-                  />
+                  {selectedProduct.image && (
+                      <img 
+                        src={selectedProduct.image} 
+                        alt={selectedProduct.name}
+                        className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
+                      />
+                  )}
                   <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/30 to-transparent opacity-80" />
                   <DrawerClose asChild>
                     <Button variant="ghost" size="icon" className="absolute top-4 right-4 bg-black/20 hover:bg-black/40 text-white rounded-full h-10 w-10 backdrop-blur-sm">
@@ -406,7 +523,7 @@ export default function PortalPage() {
               </div>
               
               <div className="px-6 pt-6 pb-48">
-                 <DrawerHeader className="text-left p-0 space-y-4">
+                  <DrawerHeader className="text-left p-0 space-y-4">
                   <div className="flex flex-col gap-2">
                     {selectedProduct.is_popular && (
                       <span className="inline-flex items-center rounded-md bg-orange-50 px-2 py-1 text-xs font-medium text-orange-700 ring-1 ring-inset ring-orange-600/10 w-fit">
@@ -414,9 +531,9 @@ export default function PortalPage() {
                       </span>
                     )}
                     <div className="flex justify-between items-start gap-4">
-                       <DrawerTitle className="text-3xl font-extrabold leading-tight">{selectedProduct.name}</DrawerTitle>
+                        <DrawerTitle className="text-3xl font-extrabold leading-tight">{selectedProduct.name}</DrawerTitle>
                     </div>
-                     <span className="text-2xl font-bold text-primary">{formatMoney(selectedProduct.price, currency)}</span>
+                      <span className="text-2xl font-bold text-primary">{formatMoney(selectedProduct.price, currency)}</span>
                   </div>
                   
                   <p className="text-muted-foreground leading-relaxed text-lg">
@@ -446,9 +563,7 @@ export default function PortalPage() {
                    <span className="font-semibold text-lg">Quantity</span>
                    <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border/50">
                      <Button 
-                       variant="ghost" 
-                       size="icon" 
-                       className="h-10 w-10 rounded-lg hover:bg-background hover:shadow-sm transition-all"
+                       variant="ghost" size="icon" className="h-10 w-10 rounded-lg hover:bg-background hover:shadow-sm transition-all"
                        onClick={() => setTempQty(Math.max(1, tempQty - 1))}
                      >
                        <Minus className="h-5 w-5" />
@@ -457,9 +572,7 @@ export default function PortalPage() {
                        {tempQty}
                      </span>
                      <Button 
-                       variant="ghost" 
-                       size="icon" 
-                       className="h-10 w-10 rounded-lg hover:bg-background hover:shadow-sm transition-all"
+                       variant="ghost" size="icon" className="h-10 w-10 rounded-lg hover:bg-background hover:shadow-sm transition-all"
                        onClick={() => setTempQty(tempQty + 1)}
                      >
                        <Plus className="h-5 w-5" />
@@ -474,18 +587,19 @@ export default function PortalPage() {
         </DrawerContent>
       </Drawer>
 
-      {/* 8. Cart Drawer */}
+      {/* 8. Cart Drawer (Active Order View) */}
       <Drawer open={isCartOpen} onOpenChange={setIsCartOpen}>
-        <DrawerContent className="max-w-lg mx-auto h-[92vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
+         <DrawerContent className="max-w-lg mx-auto h-[92vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
           <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-center">
-             <DrawerClose asChild>
-                <Button variant="ghost" size="icon" className="absolute left-4 hidden sm:flex">
-                  <X className="h-5 w-5" />
-                </Button>
-            </DrawerClose>
-            <DrawerTitle className="flex items-center gap-2 text-2xl font-bold">
-              Current Order
-            </DrawerTitle>
+              <DrawerClose asChild>
+                 <Button variant="ghost" size="icon" className="absolute left-4 hidden sm:flex">
+                   <X className="h-5 w-5" />
+                 </Button>
+             </DrawerClose>
+             <DrawerTitle className="flex flex-col items-center gap-0.5">
+               <span className="text-2xl font-bold">{activeOrder ? "Modify Order" : "Current Order"}</span>
+               {activeOrder && <span className="text-xs font-normal text-muted-foreground">Adding to Order #{activeOrder.id}</span>}
+             </DrawerTitle>
           </DrawerHeader>
           
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -495,28 +609,50 @@ export default function PortalPage() {
                 <p className="text-lg font-medium">Your cart is currently empty</p>
               </div>
             ) : (
-              cart.map((item, idx) => (
-                <div key={idx} className="flex items-start justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards" style={{ animationDelay: `${idx * 50}ms` }}>
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary text-sm font-bold border border-primary/20 shrink-0">
-                      {item.quantity}x
-                    </div>
-                    <div>
-                      <p className="font-bold text-base">{item.product.name}</p>
-                      <p className="text-sm text-muted-foreground">{formatMoney(item.product.price, currency)} each</p>
-                      {item.notes && (
-                        <div className="mt-1 flex items-start gap-1.5 text-xs text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400 p-1.5 rounded-md">
-                          <ChefHat className="h-3 w-3 mt-0.5 shrink-0" />
-                          <span className="italic leading-snug">"{item.notes}"</span>
+              cart.map((item, idx) => {
+                const locked = isLocked(item.status);
+
+                return (
+                    <div key={idx} className={cn("flex items-start justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards", locked && "opacity-80")} style={{ animationDelay: `${idx * 50}ms` }}>
+                    <div className="flex items-center gap-4">
+                        {/* Qty Control / Lock Status */}
+                        <div className={cn("flex flex-col items-center justify-center rounded-xl border w-10 h-24 shrink-0", locked ? "bg-muted/40 border-transparent" : "bg-muted/30 border-primary/20")}>
+                             {locked ? (
+                                 <div className="flex flex-col items-center justify-center gap-2 h-full text-muted-foreground">
+                                     <span className="font-bold text-lg">{item.quantity}</span>
+                                     <Lock className="h-4 w-4" />
+                                 </div>
+                             ) : (
+                                 <>
+                                    <button onClick={() => handleIncrement(idx)} className="flex-1 w-full flex items-center justify-center hover:bg-primary/10 hover:text-primary transition-colors rounded-t-xl"><Plus className="h-3.5 w-3.5"/></button>
+                                    
+                                    <span className="font-bold text-sm py-1">{item.quantity}</span>
+                                    
+                                    <button onClick={() => handleDecrement(idx)} className="flex-1 w-full flex items-center justify-center hover:bg-destructive/10 hover:text-destructive transition-colors rounded-b-xl"><Minus className="h-3.5 w-3.5"/></button>
+                                 </>
+                             )}
                         </div>
-                      )}
+
+                        <div>
+                        <div className="flex items-center gap-2">
+                             <p className="font-bold text-base">{item.product.name}</p>
+                             {locked && <span className="text-[10px] uppercase font-bold bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">{item.status}</span>}
+                        </div>
+                        <p className="text-sm text-muted-foreground">{formatMoney(item.product.price, currency)} each</p>
+                        {item.notes && (
+                            <div className="mt-1 flex items-start gap-1.5 text-xs text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400 p-1.5 rounded-md">
+                            <ChefHat className="h-3 w-3 mt-0.5 shrink-0" />
+                            <span className="italic leading-snug">"{item.notes}"</span>
+                            </div>
+                        )}
+                        </div>
                     </div>
-                  </div>
-                  <p className="font-bold text-base tabular-nums">
-                    {formatMoney(item.product.price * item.quantity, currency)}
-                  </p>
-                </div>
-              ))
+                    <p className="font-bold text-base tabular-nums">
+                        {formatMoney(item.product.price * item.quantity, currency)}
+                    </p>
+                    </div>
+                )
+              })
             )}
           </div>
 
@@ -535,16 +671,16 @@ export default function PortalPage() {
             <Button 
               className="w-full h-14 text-lg font-bold rounded-2xl gap-2 shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all"
               disabled={cart.length === 0 || isOrdering}
-              onClick={handlePlaceOrder}
+              onClick={handleOrderSubmission}
             >
-              {isOrdering ? "Sending to Kitchen..." : "Confirm Order"}
+              {isOrdering ? "Sending to Kitchen..." : (activeOrder ? "Update Order" : "Confirm Order")}
               {!isOrdering && <ChevronRight className="h-5 w-5" />}
             </Button>
           </div>
         </DrawerContent>
       </Drawer>
 
-      {/* 9. Live Order Tracker (Redesigned) */}
+      {/* 9. Live Order Tracker */}
       <LiveOrderTracker 
         isOpen={isTrackerOpen} 
         onClose={() => setIsTrackerOpen(false)} 
@@ -557,198 +693,196 @@ export default function PortalPage() {
 }
 
 /* -------------------------- Sub-components -------------------------- */
+// (Keeping your exact sub-components below as they are perfect)
 
 function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolean, onClose: () => void, order: ActiveOrder | null, currency: string }) {
-  if (!order) return null
-
-  // Status mapping
-  const steps: { id: OrderStatus, label: string, icon: React.ReactNode }[] = [
-    { id: 'received', label: 'Received', icon: <Receipt className="h-4 w-4" /> },
-    { id: 'preparing', label: 'Preparing', icon: <ChefHat className="h-4 w-4" /> },
-    { id: 'ready', label: 'On Way', icon: <Utensils className="h-4 w-4" /> },
-    { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-4 w-4" /> },
-  ]
-
-  const currentStepIndex = steps.findIndex(s => s.id === order.status)
-  const orderTotal = order.items.reduce((acc, item) => acc + (item.product.price * item.quantity), 0)
-
-  return (
-    <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      {/* Applied sm:max-h-[85vh] sm:mt-4 sm:rounded-t-[2rem] 
-         This makes it reachable on desktop and consistent with other drawers 
-      */}
-      <DrawerContent className="max-w-lg mx-auto h-[90vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
-        
-        {/* Header */}
-        <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-between px-6 pt-6">
-           <div className="text-left">
-             <DrawerTitle className="text-2xl font-bold flex items-center gap-2">
-                Order Status
-                <span className="flex h-2.5 w-2.5 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                </span>
-             </DrawerTitle>
-             <p className="text-sm text-muted-foreground font-medium mt-1">Order #{order.id}</p>
-           </div>
-           <DrawerClose asChild>
-              <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 hover:bg-muted">
-                <X className="h-5 w-5" />
-              </Button>
-          </DrawerClose>
-        </DrawerHeader>
-
-        {/* Content - Scrollable */}
-        <div className="flex-1 overflow-y-auto bg-muted/5">
-            <div className="p-6 space-y-8">
-                
-                {/* 1. Status Pulse */}
-                <div className="flex justify-center py-4">
-                    <div className="relative">
-                       <div className={cn(
-                         "h-40 w-40 rounded-full flex flex-col items-center justify-center border-4 shadow-xl transition-all duration-700",
-                         order.status === 'served' 
-                            ? "bg-green-50 border-green-200 text-green-700" 
-                            : "bg-background border-primary/10 text-foreground"
-                       )}>
-                          {order.status === 'served' ? (
-                             <>
-                               <CheckCircle2 className="h-10 w-10 mb-2 text-green-600" />
-                               <span className="font-bold text-lg">Completed</span>
-                             </>
-                          ) : (
-                             <>
-                               <div className="text-4xl font-black tabular-nums tracking-tighter">
-                                 {order.estimatedTime.split(' ')[0]}
-                               </div>
-                               <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground mt-1">Minutes</span>
-                               <span className="text-[10px] text-muted-foreground/60 font-medium mt-2 bg-muted px-2 py-0.5 rounded-full">ESTIMATED</span>
-                             </>
-                          )}
-                       </div>
-                       {order.status !== 'served' && (
-                         <div className="absolute inset-0 rounded-full border-4 border-primary/20 animate-ping opacity-30 duration-1000" />
-                       )}
-                    </div>
-                </div>
-
-                {/* 2. Timeline Steps */}
-                <div className="bg-card rounded-2xl border border-border/50 p-6 shadow-sm">
-                   <div className="flex justify-between items-start relative">
-                        {/* Connecting Line */}
-                        <div className="absolute top-4 left-0 right-0 h-0.5 bg-muted -z-0 mx-4" />
-                        
-                        {steps.map((step, idx) => {
-                             const isCompleted = idx <= currentStepIndex
-                             const isCurrent = idx === currentStepIndex
-                             return (
-                                <div key={step.id} className="flex flex-col items-center gap-2 relative z-10">
-                                   <div className={cn(
-                                      "h-9 w-9 rounded-full flex items-center justify-center border-2 transition-all duration-500",
-                                      isCompleted 
-                                        ? "bg-primary border-primary text-primary-foreground shadow-md" 
-                                        : "bg-card border-border text-muted-foreground"
-                                   )}>
-                                      {step.icon}
-                                   </div>
-                                   <span className={cn(
-                                       "text-[10px] font-bold uppercase tracking-wider transition-colors",
-                                       isCurrent ? "text-primary" : "text-muted-foreground"
-                                   )}>
-                                      {step.label}
-                                   </span>
-                                </div>
-                             )
-                        })}
-                   </div>
-                </div>
-
-                {/* 3. Order Receipt */}
-                <div className="space-y-3">
-                    <h3 className="font-semibold flex items-center gap-2 ml-1">
-                        <Receipt className="h-4 w-4 text-primary" />
-                        Order Summary
-                    </h3>
-                    <div className="bg-card rounded-2xl border border-border/50 overflow-hidden shadow-sm">
-                        {/* Receipt Header */}
-                        <div className="bg-muted/30 p-4 border-b border-dashed border-border flex justify-between items-center text-xs text-muted-foreground font-medium uppercase tracking-wider">
-                           <span>Item</span>
-                           <span>Price</span>
-                        </div>
-                        {/* Receipt Items */}
-                        <div className="p-4 space-y-4">
-                           {order.items.map((item, idx) => (
-                               <div key={idx} className="flex justify-between items-start gap-4">
-                                   <div className="flex gap-3">
-                                       <div className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[10px] font-bold shrink-0">
-                                          {item.quantity}x
-                                       </div>
-                                       <div className="space-y-1">
-                                           <span className="text-sm font-semibold leading-none block">{item.product.name}</span>
-                                           {item.notes && (
-                                              <p className="text-xs text-muted-foreground italic">Note: {item.notes}</p>
-                                           )}
-                                       </div>
-                                   </div>
-                                   <span className="text-sm font-medium tabular-nums">
-                                      {formatMoney(item.product.price * item.quantity, currency)}
-                                   </span>
-                               </div>
-                           ))}
-                        </div>
-                        {/* Receipt Total */}
-                        <div className="bg-muted/30 p-4 border-t border-dashed border-border flex justify-between items-center">
-                           <span className="text-sm font-bold">Total Paid</span>
-                           <span className="text-lg font-bold text-primary">{formatMoney(orderTotal, currency)}</span>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-
-        {/* Footer Actions */}
-        <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
-           <Button 
+    if (!order) return null
+  
+    // Status mapping
+    const steps: { id: OrderStatus, label: string, icon: React.ReactNode }[] = [
+      { id: 'pending', label: 'Received', icon: <Receipt className="h-4 w-4" /> },
+      { id: 'preparing', label: 'Preparing', icon: <ChefHat className="h-4 w-4" /> },
+      { id: 'ready', label: 'On Way', icon: <Utensils className="h-4 w-4" /> },
+      { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-4 w-4" /> },
+    ]
+  
+    const currentStepIndex = steps.findIndex(s => s.id === order.status)
+    const orderTotal = order.items.reduce((acc, item) => acc + (item.product.price * item.quantity), 0)
+  
+    return (
+      <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DrawerContent className="max-w-lg mx-auto h-[90vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
+          
+          {/* Header */}
+          <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-between px-6 pt-6">
+             <div className="text-left">
+               <DrawerTitle className="text-2xl font-bold flex items-center gap-2">
+                 Order Status
+                 <span className="flex h-2.5 w-2.5 relative">
+                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                 </span>
+               </DrawerTitle>
+               <p className="text-sm text-muted-foreground font-medium mt-1">Order #{order.id}</p>
+             </div>
+             <DrawerClose asChild>
+                <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 hover:bg-muted">
+                  <X className="h-5 w-5" />
+                </Button>
+            </DrawerClose>
+          </DrawerHeader>
+  
+          {/* Content - Scrollable */}
+          <div className="flex-1 overflow-y-auto bg-muted/5">
+              <div className="p-6 space-y-8">
+                  
+                  {/* 1. Status Pulse */}
+                  <div className="flex justify-center py-4">
+                      <div className="relative">
+                         <div className={cn(
+                           "h-40 w-40 rounded-full flex flex-col items-center justify-center border-4 shadow-xl transition-all duration-700",
+                           order.status === 'served' 
+                             ? "bg-green-50 border-green-200 text-green-700" 
+                             : "bg-background border-primary/10 text-foreground"
+                         )}>
+                            {order.status === 'served' ? (
+                               <>
+                                 <CheckCircle2 className="h-10 w-10 mb-2 text-green-600" />
+                                 <span className="font-bold text-lg">Completed</span>
+                               </>
+                            ) : (
+                               <>
+                                 <div className="text-4xl font-black tabular-nums tracking-tighter">
+                                   {order.estimatedTime.split(' ')[0]}
+                                 </div>
+                                 <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground mt-1">Minutes</span>
+                                 <span className="text-[10px] text-muted-foreground/60 font-medium mt-2 bg-muted px-2 py-0.5 rounded-full">ESTIMATED</span>
+                               </>
+                            )}
+                         </div>
+                         {order.status !== 'served' && (
+                           <div className="absolute inset-0 rounded-full border-4 border-primary/20 animate-ping opacity-30 duration-1000" />
+                         )}
+                      </div>
+                  </div>
+  
+                  {/* 2. Timeline Steps */}
+                  <div className="bg-card rounded-2xl border border-border/50 p-6 shadow-sm">
+                      <div className="flex justify-between items-start relative">
+                          {/* Connecting Line */}
+                          <div className="absolute top-4 left-0 right-0 h-0.5 bg-muted -z-0 mx-4" />
+                          
+                          {steps.map((step, idx) => {
+                               const isCompleted = idx <= currentStepIndex
+                               const isCurrent = idx === currentStepIndex
+                               return (
+                                  <div key={step.id} className="flex flex-col items-center gap-2 relative z-10">
+                                      <div className={cn(
+                                         "h-9 w-9 rounded-full flex items-center justify-center border-2 transition-all duration-500",
+                                         isCompleted 
+                                           ? "bg-primary border-primary text-primary-foreground shadow-md" 
+                                           : "bg-card border-border text-muted-foreground"
+                                      )}>
+                                          {step.icon}
+                                      </div>
+                                      <span className={cn(
+                                         "text-[10px] font-bold uppercase tracking-wider transition-colors",
+                                         isCurrent ? "text-primary" : "text-muted-foreground"
+                                      )}>
+                                          {step.label}
+                                      </span>
+                                  </div>
+                               )
+                          })}
+                      </div>
+                  </div>
+  
+                  {/* 3. Order Receipt */}
+                  <div className="space-y-3">
+                      <h3 className="font-semibold flex items-center gap-2 ml-1">
+                          <Receipt className="h-4 w-4 text-primary" />
+                          Order Summary
+                      </h3>
+                      <div className="bg-card rounded-2xl border border-border/50 overflow-hidden shadow-sm">
+                          {/* Receipt Header */}
+                          <div className="bg-muted/30 p-4 border-b border-dashed border-border flex justify-between items-center text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                             <span>Item</span>
+                             <span>Price</span>
+                          </div>
+                          {/* Receipt Items */}
+                          <div className="p-4 space-y-4">
+                             {order.items.map((item, idx) => (
+                                 <div key={idx} className="flex justify-between items-start gap-4">
+                                     <div className="flex gap-3">
+                                         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[10px] font-bold shrink-0">
+                                            {item.quantity}x
+                                         </div>
+                                         <div className="space-y-1">
+                                             <span className="text-sm font-semibold leading-none block">{item.product.name}</span>
+                                             {item.notes && (
+                                                <p className="text-xs text-muted-foreground italic">Note: {item.notes}</p>
+                                             )}
+                                         </div>
+                                     </div>
+                                     <span className="text-sm font-medium tabular-nums">
+                                        {formatMoney(item.product.price * item.quantity, currency)}
+                                     </span>
+                                 </div>
+                             ))}
+                          </div>
+                          {/* Receipt Total */}
+                          <div className="bg-muted/30 p-4 border-t border-dashed border-border flex justify-between items-center">
+                             <span className="text-sm font-bold">Total Paid</span>
+                             <span className="text-lg font-bold text-primary">{formatMoney(orderTotal, currency)}</span>
+                          </div>
+                      </div>
+                  </div>
+  
+              </div>
+          </div>
+  
+          {/* Footer Actions */}
+          <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
+             <Button 
                className="w-full h-14 text-lg font-bold rounded-xl shadow-lg shadow-primary/10" 
                variant={order.status === 'served' ? "default" : "secondary"}
                onClick={onClose}
-            >
-              {order.status === 'served' ? "Place New Order" : "Browse Menu"}
-           </Button>
+             >
+               {order.status === 'served' ? "Place New Order" : "Browse Menu"}
+             </Button>
+          </div>
+  
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+  
+  function PortalSkeleton() {
+    return (
+      <div className="p-6 space-y-8 max-w-5xl mx-auto">
+        <div className="space-y-3">
+          <Skeleton className="h-10 w-1/3" />
+          <Skeleton className="h-5 w-1/4" />
         </div>
-
-      </DrawerContent>
-    </Drawer>
-  )
-}
-
-function PortalSkeleton() {
-  return (
-    <div className="p-6 space-y-8 max-w-5xl mx-auto">
-      <div className="space-y-3">
-        <Skeleton className="h-10 w-1/3" />
-        <Skeleton className="h-5 w-1/4" />
+        <div className="flex gap-3 overflow-hidden">
+          <Skeleton className="h-10 w-28 rounded-full" />
+          <Skeleton className="h-10 w-28 rounded-full" />
+          <Skeleton className="h-10 w-28 rounded-full" />
+          <Skeleton className="h-10 w-28 rounded-full" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1,2,3,4,5,6].map(i => (
+             <Skeleton key={i} className="h-64 w-full rounded-3xl" />
+          ))}
+        </div>
       </div>
-      <div className="flex gap-3 overflow-hidden">
-        <Skeleton className="h-10 w-28 rounded-full" />
-        <Skeleton className="h-10 w-28 rounded-full" />
-        <Skeleton className="h-10 w-28 rounded-full" />
-        <Skeleton className="h-10 w-28 rounded-full" />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {[1,2,3,4,5,6].map(i => (
-           <Skeleton key={i} className="h-64 w-full rounded-3xl" />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function formatMoney(amount: number, currency: string) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    maximumFractionDigits: 0
-  }).format(amount)
-}
+    )
+  }
+  
+  function formatMoney(amount: number, currency: string) {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 0
+    }).format(amount)
+  }

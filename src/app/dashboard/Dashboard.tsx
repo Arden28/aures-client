@@ -11,6 +11,8 @@ import {
   AlertCircle,
   BarChart3,
   Store,
+  ChefHat,
+  UtensilsCrossed,
 } from "lucide-react"
 import {
   AreaChart,
@@ -77,9 +79,17 @@ export default function Dashboard() {
   const [overview, setOverview] = useState<DashboardOverview | null>(null)
   const [state, setState] = useState<LoadingState>("idle")
 
-  // Determine POS path based on role
-  const role = (user as any)?.role
-  const posLink = role === "kitchen" ? "/pos/kitchen" : "/pos/tables"
+  // ---------------------------------------------------------
+  // Role & Access Logic
+  // ---------------------------------------------------------
+  const role = (user as any)?.role || "waiter" // Default fallback
+
+  const isManagerial = ["owner", "manager"].includes(role) // Revenue, Staff stats, Top products
+  const isKitchen = role === "kitchen" // Only Orders, no Floor plan/Financials
+  const isCashier = role === "cashier" // Payments view
+
+  // Dynamic POS Link based on role
+  const posLink = isKitchen ? "/pos/kitchen" : "/pos/tables"
 
   useEffect(() => {
     let mounted = true
@@ -105,10 +115,14 @@ export default function Dashboard() {
   }, [timeframe])
 
   const currency = overview?.currency ?? "KES"
-  const hasStaffPerformance =
+  
+  // Logic to determine if staff performance table should be shown
+  const hasStaffPerformanceData =
     overview?.staff_performance &&
     ((overview.staff_performance?.waiters?.length ?? 0) > 0 ||
       (overview.staff_performance?.cashiers?.length ?? 0) > 0)
+
+  const showStaffPerformance = isManagerial && hasStaffPerformanceData
 
   return (
     <TooltipProvider>
@@ -117,19 +131,20 @@ export default function Dashboard() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">
-              Restaurant Dashboard
+              {isManagerial ? "Business Overview" : "Station Dashboard"}
             </h1>
             <p className="max-w-xl text-sm text-muted-foreground">
-              Real-time overview of sales, orders, staff performance and floor
-              occupancy across your restaurant.
+              {isManagerial 
+                ? "Real-time overview of sales, orders, staff performance and floor occupancy."
+                : `Welcome back. Here is the current activity for the ${role} station.`}
             </p>
           </div>
 
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
             <Button asChild className="w-full sm:w-auto bg-primary text-primary-foreground shadow-sm">
               <Link to={posLink}>
-                <Store className="mr-2 h-4 w-4" />
-                Open POS Interface
+                {isKitchen ? <ChefHat className="mr-2 h-4 w-4"/> : <Store className="mr-2 h-4 w-4" />}
+                {isKitchen ? "Kitchen Display" : "Open POS Interface"}
               </Link>
             </Button>
 
@@ -169,14 +184,31 @@ export default function Dashboard() {
 
         {overview && state !== "loading" && (
           <>
-            {/* Top metrics */}
+            {/* Top metrics - Conditional Rendering */}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricCard
-                label="Total revenue"
-                value={formatCurrency(overview.metrics.total_revenue, currency)}
-                icon={TrendingUp}
-                hint={timeframeLabel(overview.timeframe)}
-              />
+              
+              {/* Financials: Only for Managers */}
+              {isManagerial && (
+                <>
+                  <MetricCard
+                    label="Total revenue"
+                    value={formatCurrency(overview.metrics.total_revenue, currency)}
+                    icon={TrendingUp}
+                    hint={timeframeLabel(overview.timeframe)}
+                  />
+                   <MetricCard
+                    label="Average order value"
+                    value={formatCurrency(
+                      overview.metrics.average_order_value,
+                      currency
+                    )}
+                    icon={Activity}
+                    hint="Revenue ÷ orders"
+                  />
+                </>
+              )}
+
+              {/* Operational Metrics: Visible to Everyone */}
               <MetricCard
                 label="Total orders"
                 value={overview.metrics.total_orders.toLocaleString()}
@@ -184,167 +216,170 @@ export default function Dashboard() {
                 hint="Includes dine-in, takeaway & online"
               />
               <MetricCard
-                label="Average order value"
-                value={formatCurrency(
-                  overview.metrics.average_order_value,
-                  currency
-                )}
-                icon={Activity}
-                hint="Revenue ÷ orders"
-              />
-              <MetricCard
                 label="Active orders"
                 value={overview.metrics.active_orders.toString()}
                 icon={Users}
                 hint="Orders not yet completed"
               />
+
+              {/* Filler for Non-Managers to keep grid balanced if needed, or just let it flow */}
+              {!isManagerial && (
+                 <MetricCard
+                 label="Completed Today"
+                 value={overview.metrics.completed_today.toString()}
+                 icon={UtensilsCrossed}
+                 hint="Orders served & finalized"
+               />
+              )}
             </div>
 
-            {/* Charts row */}
-            <div className="grid gap-4 lg:grid-cols-5">
-              {/* Revenue trend */}
-              <Card className="lg:col-span-3">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <div>
-                    <CardTitle className="text-base">Revenue trend</CardTitle>
-                    <CardDescription>
-                      {timeframe === "today"
-                        ? "Revenue by hour"
-                        : "Revenue over the selected period"}
-                    </CardDescription>
-                  </div>
-                  <Badge variant="outline" className="text-xs">
-                    {timeframeLabel(timeframe)}
-                  </Badge>
-                </CardHeader>
-                <CardContent className="h-64 sm:h-72">
-                  {overview.revenue_series.length === 0 ? (
-                    <EmptyChartState />
-                  ) : (
-                    <ChartContainer
-                      config={revenueChartConfig}
-                      className="h-full w-full rounded-md border bg-background/40 p-2 sm:p-3"
-                    >
-                      <AreaChart data={overview.revenue_series}>
-                        <CartesianGrid
-                          strokeDasharray="3 3"
-                          vertical={false}
-                        />
-                        <XAxis
-                          dataKey="label"
-                          tickLine={false}
-                          axisLine={false}
-                          tickMargin={8}
-                        />
-                        <YAxis
-                          tickLine={false}
-                          axisLine={false}
-                          tickMargin={8}
-                          tickFormatter={(v) => shortCurrency(v, currency)}
-                        />
-                        <ChartTooltip
-                          content={
-                            <ChartTooltipContent
-                              formatter={(value) =>
-                                formatCurrency(value as number, currency)
-                              }
-                            />
-                          }
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="total"
-                          name={revenueChartConfig.total.label as string}
-                          stroke="var(--color-total, hsl(var(--chart-1)))"
-                          fill="var(--color-total, hsl(var(--chart-1)))"
-                          fillOpacity={0.15}
-                          strokeWidth={2}
-                          activeDot={{ r: 4 }}
-                        />
-                        <ChartLegend content={<ChartLegendContent />} />
-                      </AreaChart>
-                    </ChartContainer>
-                  )}
-                </CardContent>
-              </Card>
+            {/* Charts row - MANAGER ONLY */}
+            {isManagerial && (
+              <div className="grid gap-4 lg:grid-cols-5">
+                {/* Revenue trend */}
+                <Card className="lg:col-span-3">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <div>
+                      <CardTitle className="text-base">Revenue trend</CardTitle>
+                      <CardDescription>
+                        {timeframe === "today"
+                          ? "Revenue by hour"
+                          : "Revenue over the selected period"}
+                      </CardDescription>
+                    </div>
+                    <Badge variant="outline" className="text-xs">
+                      {timeframeLabel(timeframe)}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent className="h-64 sm:h-72">
+                    {overview.revenue_series.length === 0 ? (
+                      <EmptyChartState />
+                    ) : (
+                      <ChartContainer
+                        config={revenueChartConfig}
+                        className="h-full w-full rounded-md border bg-background/40 p-2 sm:p-3"
+                      >
+                        <AreaChart data={overview.revenue_series}>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="label"
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                          />
+                          <YAxis
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                            tickFormatter={(v) => shortCurrency(v, currency)}
+                          />
+                          <ChartTooltip
+                            content={
+                              <ChartTooltipContent
+                                formatter={(value) =>
+                                  formatCurrency(value as number, currency)
+                                }
+                              />
+                            }
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="total"
+                            name={revenueChartConfig.total.label as string}
+                            stroke="var(--color-total, hsl(var(--chart-1)))"
+                            fill="var(--color-total, hsl(var(--chart-1)))"
+                            fillOpacity={0.15}
+                            strokeWidth={2}
+                            activeDot={{ r: 4 }}
+                          />
+                          <ChartLegend content={<ChartLegendContent />} />
+                        </AreaChart>
+                      </ChartContainer>
+                    )}
+                  </CardContent>
+                </Card>
 
-              {/* Orders mix */}
-              <Card className="lg:col-span-2">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <div>
-                    <CardTitle className="text-base">Orders mix</CardTitle>
-                    <CardDescription>
-                      Dine-in vs takeaway vs online for this period
-                    </CardDescription>
-                  </div>
-                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent className="h-64 sm:h-72">
-                  {overview.orders_series.length === 0 ? (
-                    <EmptyChartState />
-                  ) : (
-                    <ChartContainer
-                      config={ordersChartConfig}
-                      className="h-full w-full rounded-md border bg-background/40 p-2 sm:p-3"
-                    >
-                      <BarChart data={overview.orders_series}>
-                        <CartesianGrid
-                          strokeDasharray="3 3"
-                          vertical={false}
-                        />
-                        <XAxis
-                          dataKey="label"
-                          tickLine={false}
-                          axisLine={false}
-                          tickMargin={8}
-                        />
-                        <YAxis
-                          tickLine={false}
-                          axisLine={false}
-                          tickMargin={8}
-                        />
-                        <ChartTooltip
-                          content={
-                            <ChartTooltipContent
-                              formatter={(value) =>
-                                (value as number).toLocaleString()
-                              }
-                            />
-                          }
-                        />
-                        <Bar
-                          dataKey="dine_in"
-                          stackId="orders"
-                          name={ordersChartConfig.dine_in.label as string}
-                          fill="var(--color-dine_in, hsl(var(--chart-2)))"
-                        />
-                        <Bar
-                          dataKey="online"
-                          stackId="orders"
-                          name={ordersChartConfig.online.label as string}
-                          fill="var(--color-online, hsl(var(--chart-3)))"
-                        />
-                        <Bar
-                          dataKey="takeaway"
-                          stackId="orders"
-                          name={ordersChartConfig.takeaway.label as string}
-                          fill="var(--color-takeaway, hsl(var(--chart-4)))"
-                        />
-                        <ChartLegend content={<ChartLegendContent />} />
-                      </BarChart>
-                    </ChartContainer>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                {/* Orders mix */}
+                <Card className="lg:col-span-2">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <div>
+                      <CardTitle className="text-base">Orders mix</CardTitle>
+                      <CardDescription>
+                        Dine-in vs takeaway vs online for this period
+                      </CardDescription>
+                    </div>
+                    <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent className="h-64 sm:h-72">
+                    {overview.orders_series.length === 0 ? (
+                      <EmptyChartState />
+                    ) : (
+                      <ChartContainer
+                        config={ordersChartConfig}
+                        className="h-full w-full rounded-md border bg-background/40 p-2 sm:p-3"
+                      >
+                        <BarChart data={overview.orders_series}>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="label"
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                          />
+                          <YAxis
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                          />
+                          <ChartTooltip
+                            content={
+                              <ChartTooltipContent
+                                formatter={(value) =>
+                                  (value as number).toLocaleString()
+                                }
+                              />
+                            }
+                          />
+                          <Bar
+                            dataKey="dine_in"
+                            stackId="orders"
+                            name={ordersChartConfig.dine_in.label as string}
+                            fill="var(--color-dine_in, hsl(var(--chart-2)))"
+                          />
+                          <Bar
+                            dataKey="online"
+                            stackId="orders"
+                            name={ordersChartConfig.online.label as string}
+                            fill="var(--color-online, hsl(var(--chart-3)))"
+                          />
+                          <Bar
+                            dataKey="takeaway"
+                            stackId="orders"
+                            name={ordersChartConfig.takeaway.label as string}
+                            fill="var(--color-takeaway, hsl(var(--chart-4)))"
+                          />
+                          <ChartLegend content={<ChartLegendContent />} />
+                        </BarChart>
+                      </ChartContainer>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
 
-            {/* Middle row: status/payments + staff performance (if any) */}
-            <div className="grid gap-4 xl:grid-cols-2">
-              {/* Orders & payments */}
+            {/* Middle row: status/payments + staff performance */}
+            <div className={cn("grid gap-4", isManagerial ? "xl:grid-cols-2" : "grid-cols-1")}>
+              {/* Orders & payments - Visible to all, but Payment details hidden for non-cashier/manager */}
               <Card>
                 <CardHeader className="space-y-1">
-                  <CardTitle className="text-base">Orders & payments</CardTitle>
-                  <CardDescription>Status and payment breakdown</CardDescription>
+                  <CardTitle className="text-base">Order Status</CardTitle>
+                  <CardDescription>Real-time tracking</CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-6">
                   <div>
@@ -359,7 +394,7 @@ export default function Dashboard() {
                       )}
                       {renderStatusRow(
                         "In progress",
-                        overview.orders_by_status.in_progress,
+                        overview.orders_by_status.PREPARING,
                         overview.metrics.total_orders
                       )}
                       {renderStatusRow(
@@ -386,40 +421,43 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <Separator />
-
-                  <div>
-                    <div className="mb-2 flex items-center justify-between text-xs font-medium">
-                      <span>Payment breakdown</span>
-                    </div>
-                    <div className="space-y-2 text-xs">
-                      {renderPaymentRow(
-                        "Paid",
-                        overview.payment_breakdown.paid,
-                        "bg-emerald-500"
-                      )}
-                      {renderPaymentRow(
-                        "Partial",
-                        overview.payment_breakdown.partial,
-                        "bg-amber-500"
-                      )}
-                      {renderPaymentRow(
-                        "Unpaid",
-                        overview.payment_breakdown.unpaid,
-                        "bg-muted-foreground"
-                      )}
-                      {renderPaymentRow(
-                        "Refunded",
-                        overview.payment_breakdown.refunded,
-                        "bg-sky-500"
-                      )}
-                    </div>
-                  </div>
+                  {(isManagerial || isCashier) && (
+                    <>
+                      <Separator />
+                      <div>
+                        <div className="mb-2 flex items-center justify-between text-xs font-medium">
+                          <span>Payment breakdown</span>
+                        </div>
+                        <div className="space-y-2 text-xs">
+                          {renderPaymentRow(
+                            "Paid",
+                            overview.payment_breakdown.paid,
+                            "bg-emerald-500"
+                          )}
+                          {renderPaymentRow(
+                            "Partial",
+                            overview.payment_breakdown.partial,
+                            "bg-amber-500"
+                          )}
+                          {renderPaymentRow(
+                            "Unpaid",
+                            overview.payment_breakdown.unpaid,
+                            "bg-muted-foreground"
+                          )}
+                          {isManagerial && renderPaymentRow(
+                            "Refunded",
+                            overview.payment_breakdown.refunded,
+                            "bg-sky-500"
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
 
-              {/* Staff performance (only if owner/manager data present) */}
-              {hasStaffPerformance && overview.staff_performance && (
+              {/* Staff performance (STRICTLY Managerial) */}
+              {showStaffPerformance && (
                 <Card>
                   <CardHeader className="flex flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
                     <div>
@@ -431,7 +469,7 @@ export default function Dashboard() {
                       </CardDescription>
                     </div>
                     <Badge variant="secondary" className="w-fit text-[11px]">
-                      Owner / Manager only
+                      Management only
                     </Badge>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -443,7 +481,7 @@ export default function Dashboard() {
 
                       {/* Waiters */}
                       <TabsContent value="waiters" className="mt-3">
-                        {overview.staff_performance.waiters.length === 0 ? (
+                        {overview.staff_performance!.waiters.length === 0 ? (
                           <EmptyTableState label="No waiter activity for this period." />
                         ) : (
                           <ScrollArea className="h-[230px]">
@@ -466,7 +504,7 @@ export default function Dashboard() {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {overview.staff_performance.waiters.map((w) => (
+                                {overview.staff_performance!.waiters.map((w) => (
                                   <TableRow key={w.id}>
                                     <TableCell className="font-medium">
                                       {w.name}
@@ -496,7 +534,7 @@ export default function Dashboard() {
 
                       {/* Cashiers */}
                       <TabsContent value="cashiers" className="mt-3">
-                        {overview.staff_performance.cashiers.length === 0 ? (
+                        {overview.staff_performance!.cashiers.length === 0 ? (
                           <EmptyTableState label="No cashier activity for this period." />
                         ) : (
                           <ScrollArea className="h-[230px]">
@@ -513,7 +551,7 @@ export default function Dashboard() {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {overview.staff_performance.cashiers.map(
+                                {overview.staff_performance!.cashiers.map(
                                   (c) => (
                                     <TableRow key={c.id}>
                                       <TableCell className="font-medium">
@@ -544,115 +582,123 @@ export default function Dashboard() {
 
             {/* Bottom row: top products + occupancy + recent orders */}
             <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
-              {/* Top products */}
-              <Card className="2xl:col-span-1">
-                <CardHeader className="space-y-1">
-                  <CardTitle className="text-base">Top products</CardTitle>
-                  <CardDescription>
-                    Most ordered items in this period
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {overview.top_products.length === 0 ? (
-                    <EmptyTableState label="No products found for this period." />
-                  ) : (
-                    <ScrollArea className="h-[260px]">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Product</TableHead>
-                            <TableHead className="hidden sm:table-cell">
-                              Category
-                            </TableHead>
-                            <TableHead className="text-right">Qty</TableHead>
-                            <TableHead className="text-right">
-                              Revenue
-                            </TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {overview.top_products.map((p) => (
-                            <TableRow key={p.id}>
-                              <TableCell className="font-medium">
-                                {p.name}
-                              </TableCell>
-                              <TableCell className="hidden text-xs text-muted-foreground sm:table-cell">
-                                {p.category}
-                              </TableCell>
-                              <TableCell className="text-right text-xs">
-                                {p.total_quantity.toLocaleString()}
-                              </TableCell>
-                              <TableCell className="text-right text-xs">
-                                {formatCurrency(p.total_revenue, currency)}
-                              </TableCell>
+              
+              {/* Top products - Manager only */}
+              {isManagerial && (
+                <Card className="2xl:col-span-1">
+                  <CardHeader className="space-y-1">
+                    <CardTitle className="text-base">Top products</CardTitle>
+                    <CardDescription>
+                      Most ordered items in this period
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {overview.top_products.length === 0 ? (
+                      <EmptyTableState label="No products found for this period." />
+                    ) : (
+                      <ScrollArea className="h-[260px]">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Product</TableHead>
+                              <TableHead className="hidden sm:table-cell">
+                                Category
+                              </TableHead>
+                              <TableHead className="text-right">Qty</TableHead>
+                              <TableHead className="text-right">
+                                Revenue
+                              </TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {overview.top_products.map((p) => (
+                              <TableRow key={p.id}>
+                                <TableCell className="font-medium">
+                                  {p.name}
+                                </TableCell>
+                                <TableCell className="hidden text-xs text-muted-foreground sm:table-cell">
+                                  {p.category}
+                                </TableCell>
+                                <TableCell className="text-right text-xs">
+                                  {p.total_quantity.toLocaleString()}
+                                </TableCell>
+                                <TableCell className="text-right text-xs">
+                                  {formatCurrency(p.total_revenue, currency)}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </ScrollArea>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Occupancy - Hidden for Kitchen */}
+              {!isKitchen && (
+                <Card className={cn(isManagerial ? "2xl:col-span-1" : "lg:col-span-1")}>
+                  <CardHeader className="space-y-1">
+                    <CardTitle className="text-base">Floor occupancy</CardTitle>
+                    <CardDescription>
+                      Realtime snapshot by floor plan
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs font-medium">
+                        <span>Overall occupancy</span>
+                        <span>{overview.metrics.occupancy_rate.toFixed(0)}%</span>
+                      </div>
+                      <Progress value={overview.metrics.occupancy_rate} />
+                    </div>
+
+                    <ScrollArea className="h-[210px]">
+                      <div className="space-y-3 text-xs">
+                        {overview.floor_plans.length === 0 && (
+                          <p className="text-muted-foreground">
+                            No floor plans configured yet.
+                          </p>
+                        )}
+
+                        {overview.floor_plans.map((fp) => {
+                          const used = fp.occupied_tables + fp.reserved_tables
+                          const total = fp.total_tables || 1
+                          const rate = (used / total) * 100
+
+                          return (
+                            <div
+                              key={fp.id}
+                              className="space-y-1 rounded-md border bg-card px-3 py-2"
+                            >
+                              <div className="flex items-center justify-between">
+                                <p className="font-medium">{fp.name}</p>
+                                <span className="text-[11px] text-muted-foreground">
+                                  {used}/{fp.total_tables} tables active
+                                </span>
+                              </div>
+                              <Progress value={rate} />
+                              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                <span>Occupied: {fp.occupied_tables}</span>
+                                <span>Reserved: {fp.reserved_tables}</span>
+                                <span>
+                                  Needs cleaning: {fp.needs_cleaning_tables}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </ScrollArea>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
-              {/* Occupancy */}
-              <Card className="2xl:col-span-1">
-                <CardHeader className="space-y-1">
-                  <CardTitle className="text-base">Floor occupancy</CardTitle>
-                  <CardDescription>
-                    Realtime snapshot by floor plan
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-xs font-medium">
-                      <span>Overall occupancy</span>
-                      <span>{overview.metrics.occupancy_rate.toFixed(0)}%</span>
-                    </div>
-                    <Progress value={overview.metrics.occupancy_rate} />
-                  </div>
-
-                  <ScrollArea className="h-[210px]">
-                    <div className="space-y-3 text-xs">
-                      {overview.floor_plans.length === 0 && (
-                        <p className="text-muted-foreground">
-                          No floor plans configured yet.
-                        </p>
-                      )}
-
-                      {overview.floor_plans.map((fp) => {
-                        const used = fp.occupied_tables + fp.reserved_tables
-                        const total = fp.total_tables || 1
-                        const rate = (used / total) * 100
-
-                        return (
-                          <div
-                            key={fp.id}
-                            className="space-y-1 rounded-md border bg-card px-3 py-2"
-                          >
-                            <div className="flex items-center justify-between">
-                              <p className="font-medium">{fp.name}</p>
-                              <span className="text-[11px] text-muted-foreground">
-                                {used}/{fp.total_tables} tables active
-                              </span>
-                            </div>
-                            <Progress value={rate} />
-                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                              <span>Occupied: {fp.occupied_tables}</span>
-                              <span>Reserved: {fp.reserved_tables}</span>
-                              <span>
-                                Needs cleaning: {fp.needs_cleaning_tables}
-                              </span>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-
-              {/* Recent orders */}
-              <Card className="lg:col-span-2 2xl:col-span-2">
+              {/* Recent orders - Visible to ALL */}
+              <Card className={cn(
+                  "lg:col-span-2", 
+                  isManagerial ? "2xl:col-span-2" : isKitchen ? "2xl:col-span-4" : "2xl:col-span-3"
+                )}>
                 <CardHeader className="space-y-1">
                   <CardTitle className="text-base">Recent orders</CardTitle>
                   <CardDescription>
@@ -695,9 +741,12 @@ export default function Dashboard() {
                             </p>
                           </div>
                           <div className="flex flex-row items-center justify-between gap-3 sm:flex-col sm:items-end">
-                            <span className="text-xs font-semibold">
-                              {formatCurrency(o.total, currency)}
-                            </span>
+                            {/* Hide total price for Kitchen/Waiters to keep it operational focus */}
+                            {(isManagerial || isCashier) && (
+                              <span className="text-xs font-semibold">
+                                {formatCurrency(o.total, currency)}
+                              </span>
+                            )}
                             <Badge
                               variant="outline"
                               className={cn(

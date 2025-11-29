@@ -92,7 +92,7 @@ export type DashboardOverview = {
   // Breakdowns
   orders_by_status: {
     pending: number
-    in_progress: number
+    PREPARING: number
     ready: number
     served: number
     completed: number
