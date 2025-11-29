@@ -4,7 +4,8 @@ import * as React from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { 
   ShoppingBag, Minus, Plus, ChevronRight, ChevronLeft, Search, 
-  Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt, Lock
+  Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt, Lock,
+  CreditCard, RotateCcw
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -27,7 +28,8 @@ import {
   type PortalCartItem,
   type TableSession,
   type ActiveOrder,
-  type OrderStatus
+  type OrderStatus,
+  type OrderItemStatus
 } from "@/api/portal"
 import { useSearchParams } from "react-router-dom"
 
@@ -75,6 +77,10 @@ export default function PortalPage() {
   // Helper to check if item is locked (already sent to kitchen)
   const isLocked = (status?: string) => status && status !== 'pending';
 
+  // Logic: Can only modify if NOT served/completed/cancelled
+  const canModifyOrder = !activeOrder || (activeOrder.status !== 'served' && activeOrder.status !== 'completed' && activeOrder.status !== 'cancelled');
+  const isOrderPaid = activeOrder?.payment_status === 'paid';
+
   // -- Init
   React.useEffect(() => {
     async function load() {
@@ -85,7 +91,6 @@ export default function PortalPage() {
       }
 
       try {
-        // Fetch everything from backend
         const data = await fetchPortalData(tableCode)
         
         setSession(data.session)
@@ -108,15 +113,43 @@ export default function PortalPage() {
     load()
   }, [tableCode])
 
-  // -- Order Subscription Logic
+  // -- Order Subscription Logic (REAL-TIME)
   React.useEffect(() => {
-    if (activeOrder && activeOrder.status !== 'served' && activeOrder.status !== 'completed') {
-      const unsubscribe = subscribeToOrderUpdates(activeOrder.id, (newStatus) => {
-        setActiveOrder(prev => prev ? { ...prev, status: newStatus } : null)
-        if (newStatus === 'served') {
-          toast.success("Your order has been served! Enjoy your meal.")
+    if (activeOrder && activeOrder.status !== 'completed') {
+      
+      const unsubscribe = subscribeToOrderUpdates(activeOrder.id, {
+        
+        // 1. Handle Whole Order Status (e.g. Pending -> Ready)
+        onOrderStatus: (newStatus) => {
+            setActiveOrder(prev => prev ? { ...prev, status: newStatus } : null)
+            if (newStatus === 'served') {
+                toast.success("Your order has been served! Enjoy your meal.")
+            }
+        },
+
+        // 2. Handle Individual Item Status (e.g. Pending -> Cooking)
+        onItemStatus: (itemId, newStatus) => {
+            // Update the Cart State to reflect the new status (This triggers the Lock UI)
+            setCart(prev => prev.map(item => {
+                if (item.order_item_id === itemId) {
+                    return { ...item, status: newStatus }
+                }
+                return item
+            }))
+
+            // Also update ActiveOrder state to keep them in sync
+            setActiveOrder(prev => {
+                if (!prev) return null;
+                return {
+                    ...prev,
+                    items: prev.items.map(item => 
+                        item.order_item_id === itemId ? { ...item, status: newStatus } : item
+                    )
+                }
+            })
         }
       })
+
       return () => unsubscribe()
     }
   }, [activeOrder?.id, activeOrder?.status])
@@ -155,6 +188,12 @@ export default function PortalPage() {
   const handleAddToCart = () => {
     if (!selectedProduct) return
     
+    // Guard: Prevent adding to completed order
+    if (!canModifyOrder) {
+        toast.error("This order is closed. Please ask for the bill or start a new order.")
+        return
+    }
+
     setCart(prev => {
       // Check if item exists (matching ID, notes, and is pending)
       const existingIndex = prev.findIndex(i => 
@@ -164,7 +203,7 @@ export default function PortalPage() {
       )
       
       if (existingIndex >= 0) {
-        // IMMUTABLE UPDATE: Create copy of array AND the specific item
+        // IMMUTABLE UPDATE
         const newCart = [...prev]
         newCart[existingIndex] = { 
             ...newCart[existingIndex], 
@@ -211,7 +250,7 @@ export default function PortalPage() {
       if (item.quantity > 1) {
           setCart(prev => {
               const newCart = [...prev]
-              // IMMUTABLE UPDATE: Create copy of the specific item
+              // IMMUTABLE UPDATE
               newCart[itemIndex] = { 
                   ...newCart[itemIndex], 
                   quantity: newCart[itemIndex].quantity - 1 
@@ -232,7 +271,7 @@ export default function PortalPage() {
 
     setCart(prev => {
         const newCart = [...prev]
-        // IMMUTABLE UPDATE: Create copy of the specific item
+        // IMMUTABLE UPDATE
         newCart[itemIndex] = { 
             ...newCart[itemIndex], 
             quantity: newCart[itemIndex].quantity + 1 
@@ -267,6 +306,22 @@ export default function PortalPage() {
     } finally {
       setIsOrdering(false)
     }
+  }
+
+  // Payment Stub
+  const handlePayment = () => {
+      toast("Redirecting to secure payment...", {
+          description: "Feature stub: This would open Stripe/PayPal."
+      })
+  }
+
+  // Reset Logic
+  const handleNewOrder = () => {
+      if(window.confirm("Start a brand new order? This will clear the current view.")) {
+          setActiveOrder(null)
+          setCart([])
+          toast.success("Ready for a new order!")
+      }
   }
 
   const filteredProducts = React.useMemo(() => {
@@ -304,9 +359,12 @@ export default function PortalPage() {
           Ready to order?
         </p>
         {activeOrder && (
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full text-xs font-bold uppercase tracking-wider mt-2">
-                <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                Active Order Open
+            <div className={cn(
+                "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mt-2",
+                activeOrder.status === 'served' ? "bg-indigo-100 text-indigo-700" : "bg-green-100 text-green-700"
+            )}>
+                <div className={cn("h-2 w-2 rounded-full animate-pulse", activeOrder.status === 'served' ? "bg-indigo-500" : "bg-green-500")} />
+                {activeOrder.status === 'served' ? "Order Served" : "Active Order Open"}
             </div>
         )}
       </div>
@@ -386,11 +444,16 @@ export default function PortalPage() {
             <div 
               key={product.id}
               onClick={() => {
-                setTempQty(1)
-                setTempNotes("")
-                setSelectedProduct(product)
+                if (canModifyOrder) {
+                    setTempQty(1); setTempNotes(""); setSelectedProduct(product)
+                } else {
+                    toast.info("Cannot add items to a completed order.")
+                }
               }}
-              className="group relative flex sm:flex-col gap-4 p-3 md:p-4 rounded-3xl border border-border/40 bg-card/50 hover:bg-card hover:border-primary/20 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 cursor-pointer overflow-hidden"
+              className={cn(
+                  "group relative flex sm:flex-col gap-4 p-3 md:p-4 rounded-3xl border border-border/40 bg-card/50 hover:bg-card hover:border-primary/20 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 cursor-pointer overflow-hidden",
+                  !canModifyOrder && "opacity-60 grayscale-[0.5] cursor-not-allowed"
+              )}
             >
               <div className="relative h-28 w-28 sm:h-48 sm:w-full shrink-0 overflow-hidden rounded-2xl bg-muted">
                 {product.image ? (
@@ -424,9 +487,11 @@ export default function PortalPage() {
                   <span className="font-bold text-lg text-primary">
                     {formatMoney(product.price, currency)}
                   </span>
-                  <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-all duration-300">
-                    <Plus className="h-4 w-4" />
-                  </div>
+                  {canModifyOrder && (
+                      <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-all duration-300">
+                        <Plus className="h-4 w-4" />
+                      </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -452,12 +517,12 @@ export default function PortalPage() {
              >
                <div className="relative h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
                  <BellRing className="h-5 w-5 text-primary" />
-                 <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-500 rounded-full animate-pulse border-2 border-white" />
+                 {activeOrder.status !== 'served' && <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-500 rounded-full animate-pulse border-2 border-white" />}
                </div>
                <div className="flex flex-col items-start text-xs">
                    <span className="font-bold text-sm text-foreground">Order #{activeOrder.id}</span>
                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                     <span className={cn("h-1.5 w-1.5 rounded-full", activeOrder.status === 'served' ? "bg-green-500" : "bg-orange-500")} />
+                     <span className={cn("h-1.5 w-1.5 rounded-full", activeOrder.status === 'served' ? "bg-indigo-500" : "bg-orange-500")} />
                      <span className="capitalize">{activeOrder.status}</span>
                    </div>
                </div>
@@ -466,36 +531,48 @@ export default function PortalPage() {
         )}
       </AnimatePresence>
 
-      {/* 6. Floating Cart Button */}
+      {/* 6. Floating Action Button Logic */}
       <AnimatePresence>
-        {cartCount > 0 && !isTrackerOpen && (
-          <motion.div 
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-6 left-0 right-0 z-50 px-4 pointer-events-none"
-          >
+        {/* Scenario A: Can Modify -> Show Cart Button */}
+        {cartCount > 0 && canModifyOrder && !isTrackerOpen && (
+          <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="fixed bottom-6 left-0 right-0 z-50 px-4 pointer-events-none">
             <div className="max-w-md mx-auto pointer-events-auto">
-              <Button 
-                size="lg" 
-                onClick={() => setIsCartOpen(true)}
-                className="w-full h-16 rounded-full bg-primary text-primary-foreground shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-[1.02] hover:bg-primary/90 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all flex items-center justify-between px-6 border-2 border-white/10"
-              >
+              <Button size="lg" onClick={() => setIsCartOpen(true)} className="w-full h-16 rounded-full bg-primary text-primary-foreground shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-[1.02] hover:bg-primary/90 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all flex items-center justify-between px-6 border-2 border-white/10">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-background/20 backdrop-blur-sm text-sm font-bold">
-                    {cartCount}
-                  </div>
-                  <div className="flex flex-col items-start text-xs">
-                    <span className="font-bold text-base">{activeOrder ? "Update Order" : "View Order"}</span>
-                    <span className="opacity-80 font-normal">{activeOrder ? "Modify items" : "Finish your meal"}</span>
-                  </div>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-background/20 backdrop-blur-sm text-sm font-bold">{cartCount}</div>
+                  <div className="flex flex-col items-start text-xs"><span className="font-bold text-base">{activeOrder ? "Update Order" : "View Order"}</span><span className="opacity-80 font-normal">Finish your meal</span></div>
                 </div>
-                <span className="font-bold text-xl tracking-tight">
-                  {formatMoney(cartTotal, currency)}
-                </span>
+                <span className="font-bold text-xl tracking-tight">{formatMoney(cartTotal, currency)}</span>
               </Button>
             </div>
           </motion.div>
+        )}
+
+        {/* Scenario B: Served & Unpaid -> Show Pay Button */}
+        {!canModifyOrder && !isOrderPaid && !isTrackerOpen && activeOrder && (
+           <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="fixed bottom-6 left-0 right-0 z-50 px-4 pointer-events-none">
+             <div className="max-w-md mx-auto pointer-events-auto">
+               <Button size="lg" onClick={handlePayment} className="w-full h-16 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-[1.02] transition-all flex items-center justify-between px-6 border-2 border-white/10">
+                 <div className="flex items-center gap-3">
+                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20"><CreditCard className="h-5 w-5"/></div>
+                   <div className="flex flex-col items-start text-xs"><span className="font-bold text-base">Pay Bill</span><span className="opacity-90 font-normal">Secure Checkout</span></div>
+                 </div>
+                 <span className="font-bold text-xl">{formatMoney(cartTotal, currency)}</span>
+               </Button>
+             </div>
+           </motion.div>
+        )}
+
+        {/* Scenario C: Paid -> Show New Order Button */}
+        {isOrderPaid && !isTrackerOpen && (
+            <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="fixed bottom-6 left-0 right-0 z-50 px-4 pointer-events-none">
+                <div className="max-w-md mx-auto pointer-events-auto">
+                <Button size="lg" onClick={handleNewOrder} className="w-full h-16 rounded-full bg-primary text-primary-foreground shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-[1.02] hover:bg-primary/90 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all flex items-center justify-center gap-3 border-2 border-white/10">
+                    <RotateCcw className="h-5 w-5" />
+                    <span className="font-bold text-lg">Place Another Order</span>
+                </Button>
+                </div>
+            </motion.div>
         )}
       </AnimatePresence>
 
@@ -587,7 +664,7 @@ export default function PortalPage() {
         </DrawerContent>
       </Drawer>
 
-      {/* 8. Cart Drawer (Active Order View) */}
+      {/* 8. Cart Drawer (Only reachable if canModifyOrder is true) */}
       <Drawer open={isCartOpen} onOpenChange={setIsCartOpen}>
          <DrawerContent className="max-w-lg mx-auto h-[92vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
           <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-center">
@@ -848,7 +925,7 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
                variant={order.status === 'served' ? "default" : "secondary"}
                onClick={onClose}
              >
-               {order.status === 'served' ? "Place New Order" : "Browse Menu"}
+               {order.status === 'served' ? "Close Tracker" : "Browse Menu"}
              </Button>
           </div>
   

@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import useAuth from "@/hooks/useAuth"
+import { Toaster } from "sonner"
 
 type PosRole = "waiter" | "cashier" | "kitchen"
 
@@ -186,6 +187,8 @@ export default function PosLayout() {
           <Outlet />
         </div>
       </main>
+
+      <Toaster />
     </div>
   )
 }
