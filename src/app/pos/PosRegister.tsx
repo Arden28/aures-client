@@ -253,7 +253,7 @@ export default function PosRegister() {
     try {
         const order = await submitPosOrder(cart, {
             tableId: tableId,
-            source: 'pos'
+            // source: 'pos'
         })
         
         toast.success(`Order #${order.id} Created!`)
