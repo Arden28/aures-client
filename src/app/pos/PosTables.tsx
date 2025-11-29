@@ -1,7 +1,7 @@
-// src/app/pos/PosTables.tsx
 "use client"
 
 import * as React from "react"
+import { useNavigate } from "react-router-dom"
 import { 
   UtensilsCrossed, 
   Loader2, 
@@ -13,7 +13,9 @@ import {
   Play,
   Receipt,
   Trash2,
-  ChefHat
+  RefreshCw,
+  Sparkles,
+  ArrowRight
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -23,7 +25,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -37,52 +39,72 @@ import type { FloorPlan } from "@/api/floor"
 import { fetchFloorPlans } from "@/api/floor"
 import type { Table, TableStatus } from "@/api/table"
 import { fetchTables } from "@/api/table"
+import { fetchOrders, type Order } from "@/api/order"
+import apiService from "@/api/apiService" // Importing to handle table status updates
 import { toast } from "sonner"
+
+/* -------------------------------------------------------------------------- */
+/* Types & API Helpers                                                        */
+/* -------------------------------------------------------------------------- */
 
 type LoadingState = "idle" | "loading" | "success" | "error"
 
+// Helper to update table status directly
+async function updateTableStatus(tableId: number, status: TableStatus) {
+  // Assuming PATCH /v1/tables/:id allows updating status
+  return apiService.patch(`/v1/tables/${tableId}`, { status })
+}
+
+/* -------------------------------------------------------------------------- */
+/* Main Component                                                             */
+/* -------------------------------------------------------------------------- */
+
 export default function PosTables() {
+  const navigate = useNavigate()
   const [state, setState] = React.useState<LoadingState>("idle")
+  
+  // Data
   const [floors, setFloors] = React.useState<FloorPlan[]>([])
   const [tables, setTables] = React.useState<Table[]>([])
+  const [activeOrders, setActiveOrders] = React.useState<Order[]>([]) 
   const [activeFloorId, setActiveFloorId] = React.useState<number | null>(null)
 
   const isLoading = state === "loading"
 
-  React.useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      try {
-        setState("loading")
-        const [floorList, tableList] = await Promise.all([
-          fetchFloorPlans({ status: "active" }),
-          fetchTables(),
-        ])
+  // Load Data
+  const loadData = React.useCallback(async () => {
+    try {
+      setState("loading")
+      const [floorList, tableList, orderRes] = await Promise.all([
+        fetchFloorPlans({ status: "active" }),
+        fetchTables(),
+        fetchOrders({ status: "pending" }) 
+      ])
 
-        if (!mounted) return
+      setFloors(floorList)
+      setTables(tableList)
+      
+      const orders = Array.isArray(orderRes) ? orderRes : (orderRes.items || [])
+      // Filter active orders
+      setActiveOrders(orders.filter(o => !['completed', 'cancelled'].includes(o.status)))
 
-        setFloors(floorList)
-        setTables(tableList)
-
-        if (floorList.length > 0) {
-          setActiveFloorId(floorList[0].id)
-        }
-
-        setState("success")
-      } catch (err) {
-        console.error(err)
-        if (mounted) {
-          setState("error")
-          toast.error("Failed to load floor plans or tables.")
-        }
+      if (floorList.length > 0 && !activeFloorId) {
+        setActiveFloorId(floorList[0].id)
       }
-    })()
 
-    return () => {
-      mounted = false
+      setState("success")
+    } catch (err) {
+      console.error(err)
+      setState("error")
+      toast.error("Failed to load floor data.")
     }
-  }, [])
+  }, [activeFloorId])
 
+  React.useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  // Memoized Data
   const activeFloor = React.useMemo(
     () => floors.find((f) => f.id === activeFloorId) ?? null,
     [floors, activeFloorId]
@@ -94,14 +116,19 @@ export default function PosTables() {
   }, [tables, activeFloor])
 
   return (
-    <div className="flex h-full w-full flex-1 flex-col gap-4 bg-background p-2 sm:p-4 text-foreground">
+    <div className="flex h-full w-full flex-1 flex-col gap-4 bg-background p-2 sm:p-4 text-foreground overflow-hidden">
       {/* Header & Legend */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Floor View</h2>
-          <p className="hidden sm:block text-sm text-muted-foreground">
-            Select a table to manage orders.
-          </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Floor View</h2>
+            <p className="hidden sm:block text-sm text-muted-foreground">
+              Select a table to manage orders.
+            </p>
+          </div>
+          <Button variant="ghost" size="icon" onClick={loadData} className="sm:hidden">
+              <RefreshCw className="h-4 w-4" />
+          </Button>
         </div>
         
         {/* Responsive Legend */}
@@ -114,8 +141,8 @@ export default function PosTables() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 flex-col gap-4 overflow-hidden">
-        {isLoading ? (
+      <div className="flex flex-1 flex-col gap-4 overflow-hidden min-h-0">
+        {isLoading && floors.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
             Loading floor layout...
@@ -131,7 +158,7 @@ export default function PosTables() {
             className="flex h-full flex-col gap-3"
           >
             {/* Floor Tabs */}
-            <TabsList className="w-full justify-start gap-2 bg-transparent p-0 overflow-x-auto no-scrollbar">
+            <TabsList className="w-full justify-start gap-2 bg-transparent p-0 overflow-x-auto no-scrollbar shrink-0">
               {floors.map((floor) => (
                 <TabsTrigger
                   key={floor.id}
@@ -147,9 +174,7 @@ export default function PosTables() {
             </TabsList>
 
             {/* The Floor Map Container */}
-            {/* Note: We keep specific colors for the floor itself to maintain realism, but ensure text contrasts well */}
-            <Card className="relative flex-1 overflow-hidden border-none shadow-md bg-[#e3cba8] dark:bg-[#2a241e] rounded-xl">
-              {/* Realistic wood floor background pattern */}
+            <Card className="relative flex-1 overflow-hidden border-none shadow-md bg-[#e3cba8] dark:bg-[#2a241e] rounded-xl ring-1 ring-black/5">
               <div className="absolute inset-0 z-0 opacity-30 mix-blend-multiply dark:opacity-10" style={{
                   backgroundImage: `url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h40v40H0V0zm20 20h20v20H20V20zM0 20h20v20H0V20zM20 0h20v20H20V0z' fill='%238B4513' fill-opacity='0.2' fill-rule='evenodd'/%3E%3C/svg%3E")`,
                   backgroundSize: '80px 80px'
@@ -157,23 +182,30 @@ export default function PosTables() {
                <div className="absolute inset-0 z-0 bg-gradient-to-b from-black/5 to-black/20 mix-blend-overlay pointer-events-none" />
 
               <ScrollArea className="h-full w-full z-10">
-                 {/* Map Canvas */}
-                 <div className="min-w-[600px] min-h-[500px] p-8 sm:p-12">
-                     <div className="flex flex-wrap gap-x-16 gap-y-16 justify-start content-start">
-                        {floorTables.length === 0 ? (
-                          <div className="w-full flex h-60 items-center justify-center text-sm font-medium text-amber-950/60 dark:text-amber-100/40">
-                            No tables placed on this floor yet.
-                          </div>
-                        ) : (
-                          floorTables.map((table) => (
-                            <RealisticTableWithChairs
-                              key={table.id}
-                              table={table}
-                            />
-                          ))
-                        )}
+                  <div className="min-w-fit min-h-full p-6 sm:p-12 pb-32">
+                      <div className="flex flex-wrap gap-x-12 sm:gap-x-16 gap-y-12 sm:gap-y-16 justify-start content-start">
+                         {floorTables.length === 0 ? (
+                           <div className="w-full flex h-60 items-center justify-center text-sm font-medium text-amber-950/60 dark:text-amber-100/40">
+                             No tables placed on this floor yet.
+                           </div>
+                         ) : (
+                           floorTables.map((table) => {
+                             const activeOrder = activeOrders.find(o => o.table?.id === table.id);
+                             return (
+                               <RealisticTableWithChairs
+                                 key={table.id}
+                                 table={table}
+                                 activeOrder={activeOrder}
+                                 navigate={navigate}
+                                 refreshData={loadData}
+                               />
+                             )
+                           })
+                         )}
                       </div>
                   </div>
+                  <ScrollBar orientation="horizontal" />
+                  <ScrollBar orientation="vertical" />
               </ScrollArea>
             </Card>
           </Tabs>
@@ -183,40 +215,59 @@ export default function PosTables() {
   )
 }
 
-/* ---------------- Sub-components ---------------- */
+/* -------------------------------------------------------------------------- */
+/* Sub-Components                                                             */
+/* -------------------------------------------------------------------------- */
 
-/**
- * RealisticTableWithChairs renders:
- * - A smaller central table.
- * - Realistic chairs positioned around the table.
- * - The Popover trigger.
- */
-function RealisticTableWithChairs({ table }: { table: Table }) {
-  const statusStyles = tableStatusStylesReal(table.status)
+interface TableProps {
+    table: Table
+    activeOrder?: Order
+    navigate: any
+    refreshData: () => void
+}
+
+function RealisticTableWithChairs({ table, activeOrder, navigate, refreshData }: TableProps) {
+  // Visual logic: Active order dominates table status visually
+  const effectiveStatus = activeOrder ? 'occupied' : table.status;
+  
+  const statusStyles = tableStatusStylesReal(effectiveStatus as TableStatus)
   const isRound = table.capacity <= 4
-
-  // Clamp seats for visual sanity
   const seatCount = Math.min(Math.max(table.capacity, 2), 10)
   const seats = Array.from({ length: seatCount })
-
-  // Sizing for layout calculation
   const containerSize = 120 
   const tableSize = 60 
   const centerOffset = (containerSize - tableSize) / 2 
   const radius = tableSize / 2 + 18 
 
+  // Handlers
+  const handleMarkCleaned = async () => {
+    try {
+        await updateTableStatus(table.id, "free")
+        toast.success(`${table.name} is now free`)
+        refreshData()
+    } catch (e) {
+        toast.error("Update failed")
+    }
+  }
+
+  const handleMarkNeedsCleaning = async () => {
+    try {
+        await updateTableStatus(table.id, "needs_cleaning")
+        toast.success(`${table.name} marked for cleaning`)
+        refreshData()
+    } catch (e) {
+        toast.error("Update failed")
+    }
+  }
+
   return (
     <Popover>
-       {/* Container defines the total footprint (table + chairs) */}
       <div className="relative flex-shrink-0" style={{ width: containerSize, height: containerSize }}>
-
-        {/* Chairs (Rendered first to be underneath) */}
         {seats.map((_, index) => {
             const angle = (index / seatCount) * 2 * Math.PI - Math.PI / 2 
             const x = (containerSize / 2) + radius * Math.cos(angle)
             const y = (containerSize / 2) + radius * Math.sin(angle)
             const rotation = (angle * 180) / Math.PI + 90
-
             return (
                 <div
                     key={index}
@@ -234,7 +285,6 @@ function RealisticTableWithChairs({ table }: { table: Table }) {
             )
         })}
 
-        {/* Central Table Trigger */}
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -242,52 +292,80 @@ function RealisticTableWithChairs({ table }: { table: Table }) {
           className={cn(
             "absolute group flex flex-col items-center justify-center transition-all hover:-translate-y-0.5 active:scale-95 z-10",
             isRound ? "rounded-full" : "rounded-lg",
-            // Table Top: Light wood in light mode, Dark wood in dark mode
             "bg-gradient-to-br from-[#f3e4d0] to-[#dcbca0] dark:from-[#8b5a2b] dark:to-[#5c3a1e] border-[2px] shadow-md",
             statusStyles.border
           )}
         >
-            {/* Hover Info Overlay */}
             <div className={cn(
               "absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 bg-black/10 backdrop-blur-[1px]",
                 isRound ? "rounded-full" : "rounded-lg",
             )}>
-                 <Info className={cn("h-4 w-4", statusStyles.textIcon)} />
+                  <Info className={cn("h-4 w-4", statusStyles.textIcon)} />
             </div>
 
-          {/* Table Label */}
           <div className="flex flex-col items-center gap-0 group-hover:opacity-0 transition-opacity duration-200">
             <span className="text-[11px] font-extrabold text-amber-950 dark:text-amber-100 leading-none">
                 {table.name}
             </span>
+            {/* Display total if occupied (active order exists) */}
+            {activeOrder && (
+                 <span className="text-[9px] font-bold text-amber-900/80 dark:text-amber-100/80 mt-0.5">
+                    {formatMoney(activeOrder.total)}
+                 </span>
+            )}
           </div>
         </button>
       </PopoverTrigger>
       </div>
 
-      {/* Updated Popover Content */}
       <PopoverContent 
         className="w-[90vw] max-w-[320px] p-0 overflow-hidden rounded-xl shadow-2xl border-border bg-card text-card-foreground" 
         align="center" 
         sideOffset={-20}
         collisionPadding={16}
       >
-         <TableDetailsPopoverContent table={table} statusStyles={statusStyles} />
+         <TableDetailsPopoverContent 
+            table={table} 
+            activeOrder={activeOrder}
+            statusStyles={statusStyles} 
+            navigate={navigate}
+            onMarkClean={handleMarkCleaned}
+            onMarkDirty={handleMarkNeedsCleaning}
+         />
       </PopoverContent>
     </Popover>
   )
 }
 
-/**
- * Improved, Compact Popover Content
- */
-function TableDetailsPopoverContent({ table, statusStyles }: { table: Table, statusStyles: any }) {
+function TableDetailsPopoverContent({ 
+    table, 
+    activeOrder, 
+    statusStyles, 
+    navigate,
+    onMarkClean,
+    onMarkDirty
+}: { 
+    table: Table, 
+    activeOrder?: Order, 
+    statusStyles: any, 
+    navigate: any,
+    onMarkClean: () => void,
+    onMarkDirty: () => void
+}) {
     
-    // Mock data logic based on status
-    const isOccupied = table.status === 'occupied' || table.status === 'reserved';
-    const timeText = isOccupied ? "24m" : "-";
-    const amountText = isOccupied ? "$42.50" : "-";
-
+    // Logic extraction
+    const isOccupied = !!activeOrder
+    const elapsed = useElapsedTimer(activeOrder?.opened_at)
+    const guests = activeOrder?.client ? 1 : table.capacity 
+    
+    // Status Checks
+    const isServedOrCompleted = activeOrder && (activeOrder.status === 'served' || activeOrder.status === 'completed')
+    const isNeedsCleaning = table.status === 'needs_cleaning'
+    
+    // Nav Handlers
+    const handleStartOrder = () => navigate(`/pos/register?tableId=${table.id}`)
+    const handleOpenOrder = () => navigate(`/pos/register?tableId=${table.id}`)
+    
     return (
         <div className="flex flex-col bg-card">
             
@@ -296,90 +374,143 @@ function TableDetailsPopoverContent({ table, statusStyles }: { table: Table, sta
                 <div className="flex flex-col">
                     <h4 className="text-sm font-bold text-foreground">{table.name}</h4>
                     <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
-                        Code: {table.code}
+                        {activeOrder ? `Order #${activeOrder.id}` : `Code: ${table.code}`}
                     </span>
                 </div>
                 <Badge variant="outline" className={cn("border-0 font-semibold capitalize", statusStyles.badgeCls)}>
                    {statusStyles.icon && <statusStyles.icon className="w-3 h-3 mr-1.5" />}
-                   {table.status.replace("_", " ")}
+                   {activeOrder ? activeOrder.status : table.status.replace("_", " ")}
                 </Badge>
             </div>
 
-            {/* 2. Quick Stats Grid */}
-            <div className="p-3">
-                <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-2 border border-dashed border-border">
-                    <div className="flex flex-col items-center justify-center gap-1">
-                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
-                            <Users className="w-3 h-3" /> Guests
+            {/* 2. Quick Stats Grid - ONLY IF OCCUPIED */}
+            {isOccupied && (
+                <div className="p-3">
+                    <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-2 border border-dashed border-border">
+                        <div className="flex flex-col items-center justify-center gap-1">
+                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
+                                <Users className="w-3 h-3" /> Guests
+                            </div>
+                            <span className="text-sm font-semibold text-foreground">{guests}</span>
                         </div>
-                        <span className="text-sm font-semibold text-foreground">{table.capacity}</span>
-                    </div>
-                    
-                    <Separator orientation="vertical" className="h-8 bg-border" />
+                        
+                        <Separator orientation="vertical" className="h-8 bg-border" />
 
-                    <div className="flex flex-col items-center justify-center gap-1">
-                         <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
-                            <Clock className="w-3 h-3" /> Time
+                        <div className="flex flex-col items-center justify-center gap-1">
+                              <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
+                                <Clock className="w-3 h-3" /> Time
+                            </div>
+                            <span className="text-sm font-semibold text-foreground">{elapsed}</span>
                         </div>
-                        <span className="text-sm font-semibold text-foreground">{timeText}</span>
-                    </div>
 
-                    <Separator orientation="vertical" className="h-8 bg-border" />
+                        <Separator orientation="vertical" className="h-8 bg-border" />
 
-                    <div className="flex flex-col items-center justify-center gap-1">
-                         <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
-                            <Receipt className="w-3 h-3" /> Total
+                        <div className="flex flex-col items-center justify-center gap-1">
+                              <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
+                                <Receipt className="w-3 h-3" /> Total
+                            </div>
+                            <span className="text-sm font-semibold text-foreground">
+                                {formatMoney(activeOrder.total)}
+                            </span>
                         </div>
-                        <span className="text-sm font-semibold text-foreground">{amountText}</span>
                     </div>
                 </div>
-            </div>
+            )}
 
             {/* 3. Action Buttons */}
-            <div className="p-3 pt-0 flex flex-col gap-2">
-                 {table.status === 'free' ? (
-                      <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm h-9 text-xs sm:text-sm">
+            <div className={cn("p-3 flex flex-col gap-2", !isOccupied && "pt-0")}>
+                 
+                 {/* STATE: FREE */}
+                 {!isOccupied && !isNeedsCleaning && (
+                      <Button onClick={handleStartOrder} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm h-9 text-xs sm:text-sm">
                         <Play className="w-3.5 h-3.5 mr-2 fill-current" />
                         Start New Order
                     </Button>
-                 ) : table.status === 'needs_cleaning' ? (
-                     <Button className="w-full border-border bg-background hover:bg-accent text-foreground h-9 text-xs sm:text-sm" variant="outline">
-                         <CheckCircle2 className="w-3.5 h-3.5 mr-2" />
+                 )}
+
+                 {/* STATE: NEEDS CLEANING */}
+                 {isNeedsCleaning && !isOccupied && (
+                     <Button onClick={onMarkClean} className="w-full border-border bg-background hover:bg-accent text-foreground h-9 text-xs sm:text-sm" variant="outline">
+                         <Sparkles className="w-3.5 h-3.5 mr-2 text-blue-500" />
                          Mark as Cleaned
                      </Button>
-                 ) : (
-                    // Occupied
-                    <div className="grid grid-cols-2 gap-2">
-                         <Button variant="default" className="w-full h-9 text-xs sm:text-sm bg-primary text-primary-foreground hover:bg-primary/90">
-                            <UtensilsCrossed className="w-3.5 h-3.5 mr-2" />
-                            Add Items
-                        </Button>
-                         <Button variant="secondary" className="w-full h-9 text-xs sm:text-sm bg-secondary text-secondary-foreground hover:bg-secondary/80">
-                            Payment
-                        </Button>
-                    </div>
                  )}
-                 
-                 {/* Secondary utility links */}
-                 <div className="flex items-center justify-between pt-2 px-1">
-                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground">
-                        <ChefHat className="w-3 h-3 mr-1.5" />
-                        KDS Status
-                    </Button>
-                    {table.status !== 'free' && (
-                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10">
-                            <Trash2 className="w-3 h-3 mr-1.5" />
-                            Cancel
-                        </Button>
-                    )}
-                 </div>
+
+                 {/* STATE: OCCUPIED (Active Order) */}
+                 {isOccupied && (
+                    <>
+                        {/* If Served/Completed: Show Clean & New Order */}
+                        {isServedOrCompleted ? (
+                            <div className="grid grid-cols-2 gap-2">
+                                <Button onClick={onMarkDirty} variant="secondary" className="w-full h-9 text-xs sm:text-sm border border-border">
+                                    <UtensilsCrossed className="w-3.5 h-3.5 mr-2" />
+                                    Mark Dirty
+                                </Button>
+                                <Button onClick={handleStartOrder} className="w-full h-9 text-xs sm:text-sm bg-primary text-primary-foreground">
+                                    <Play className="w-3.5 h-3.5 mr-2" />
+                                    New Order
+                                </Button>
+                            </div>
+                        ) : (
+                            /* If Pending/Preparing/Ready: Show single Open button (Replaces Add/Pay/KDS) */
+                            <Button onClick={handleOpenOrder} className="w-full h-9 text-xs sm:text-sm bg-primary text-primary-foreground">
+                                <ArrowRight className="w-3.5 h-3.5 mr-2" />
+                                Open Order
+                            </Button>
+                        )}
+                        
+                        {/* Only show Cancel if not served/completed */}
+                        {!isServedOrCompleted && (
+                             <div className="flex items-center justify-center pt-2">
+                                <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10">
+                                    <Trash2 className="w-3 h-3 mr-1.5" />
+                                    Cancel Order
+                                </Button>
+                             </div>
+                        )}
+                    </>
+                 )}
             </div>
         </div>
     )
 }
 
-
 /* ---------------- Helpers ---------------- */
+
+function useElapsedTimer(openedAt: string | null | undefined) {
+    const [time, setTime] = React.useState("0m")
+
+    React.useEffect(() => {
+        if (!openedAt) return
+        
+        const update = () => {
+            const start = new Date(openedAt).getTime()
+            const now = new Date().getTime()
+            const diff = Math.max(0, now - start)
+            const m = Math.floor(diff / 60000)
+            const h = Math.floor(m / 60)
+            
+            if (h > 0) {
+                setTime(`${h}h ${m % 60}m`)
+            } else {
+                setTime(`${m}m`)
+            }
+        }
+        
+        update()
+        const interval = setInterval(update, 60000) 
+        return () => clearInterval(interval)
+    }, [openedAt])
+
+    return time
+}
+
+function formatMoney(amount: number) {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+    }).format(amount)
+}
 
 function LegendDot({ status, className }: { status: TableStatus, className?: string }) {
   const styles = tableStatusStylesReal(status)
@@ -393,7 +524,6 @@ function LegendDot({ status, className }: { status: TableStatus, className?: str
     />
   )
 }
-
 
 function tableStatusStylesReal(status: TableStatus) {
   switch (status) {

@@ -2,6 +2,7 @@
 "use client"
 
 import * as React from "react"
+import { useSearchParams, useNavigate } from "react-router-dom" // CHANGED: React Router
 import { 
   Search, 
   UtensilsCrossed, 
@@ -13,7 +14,8 @@ import {
   ShoppingBag,
   Delete as DeleteIcon,
   ChevronLeft,
-  AlertTriangle
+  AlertTriangle,
+  Loader2
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -34,31 +36,22 @@ import {
 // API Imports
 import { fetchProducts, type Product } from "@/api/product"
 import { fetchCategories, type Category } from "@/api/category"
+import { submitPosOrder, type PosCartItem, calculatePosTotals } from "@/api/pos"
 import { toast } from "sonner"
-
-/* -------------------------------------------------------------------------- */
-/* Types                                                                      */
-/* -------------------------------------------------------------------------- */
-
-type CartItem = {
-  uuid: string
-  product: Product
-  quantity: number
-  discountPercent: number
-  customPrice: number | null
-}
 
 type CalcMode = "qty" | "disc" | "price"
 
-/* -------------------------------------------------------------------------- */
-/* Main Component                                                             */
-/* -------------------------------------------------------------------------- */
-
 export default function PosRegister() {
+  const navigate = useNavigate() // CHANGED: Hook
+  const [searchParams] = useSearchParams() // CHANGED: Destructure array
+  const tableIdParam = searchParams.get('tableId')
+  const tableId = tableIdParam ? parseInt(tableIdParam) : null
+
   // -- Data
   const [products, setProducts] = React.useState<Product[]>([])
   const [categories, setCategories] = React.useState<Category[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
+  const [isSubmitting, setIsSubmitting] = React.useState(false)
 
   // -- UI
   const [selectedCategoryId, setSelectedCategoryId] = React.useState<number | "all">("all")
@@ -67,7 +60,7 @@ export default function PosRegister() {
   const [isClearCartOpen, setIsClearCartOpen] = React.useState(false)
 
   // -- Cart & Calc
-  const [cart, setCart] = React.useState<CartItem[]>([])
+  const [cart, setCart] = React.useState<PosCartItem[]>([])
   const [selectedItemUuid, setSelectedItemUuid] = React.useState<string | null>(null)
   const [calcMode, setCalcMode] = React.useState<CalcMode>("qty")
   
@@ -100,7 +93,6 @@ export default function PosRegister() {
   // --------------------------------------------------------------------------
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore inputs and if dialog is open
       if ((e.target as HTMLElement).tagName === 'INPUT') return
       if (isClearCartOpen) return
 
@@ -110,8 +102,6 @@ export default function PosRegister() {
         handleCalcNum('.')
       } else if (e.key === 'Backspace') {
         handleCalcBackspace()
-      } else if (e.key === 'Enter') {
-        if (cart.length > 0) toast.success("Payment Triggered (Keyboard)")
       } else if (e.key === 'Delete') {
         if(selectedItemUuid) removeItem(selectedItemUuid)
       }
@@ -152,7 +142,7 @@ export default function PosRegister() {
         })
       }
 
-      const newItem: CartItem = {
+      const newItem: PosCartItem = {
         uuid: crypto.randomUUID(),
         product,
         quantity: 1,
@@ -234,14 +224,14 @@ export default function PosRegister() {
     }))
   }
 
-  const getCurrentValue = (item: CartItem, mode: CalcMode): number => {
+  const getCurrentValue = (item: PosCartItem, mode: CalcMode): number => {
     if (mode === "qty") return item.quantity
     if (mode === "disc") return item.discountPercent
     if (mode === "price") return item.customPrice ?? item.product.price
     return 0
   }
 
-  const applyValue = (item: CartItem, mode: CalcMode, val: number): CartItem => {
+  const applyValue = (item: PosCartItem, mode: CalcMode, val: number): PosCartItem => {
     const copy = { ...item }
     if (mode === "qty") copy.quantity = val
     if (mode === "disc") copy.discountPercent = Math.min(val, 100)
@@ -250,18 +240,37 @@ export default function PosRegister() {
   }
 
   // --------------------------------------------------------------------------
-  // 5. Totals
+  // 5. Totals & Checkout
   // --------------------------------------------------------------------------
-  const { subtotal, tax, total } = React.useMemo(() => {
-    const sub = cart.reduce((acc, item) => {
-      const price = item.customPrice ?? item.product.price
-      const finalPrice = price * (1 - item.discountPercent / 100)
-      return acc + (finalPrice * item.quantity)
-    }, 0)
-    const t = sub * 0.10
-    return { subtotal: sub, tax: t, total: sub + t }
+  const { subtotal, taxAmount, total } = React.useMemo(() => {
+    return calculatePosTotals(cart)
   }, [cart])
 
+  const handleCheckout = async () => {
+    if (cart.length === 0) return
+    setIsSubmitting(true)
+
+    try {
+        const order = await submitPosOrder(cart, {
+            tableId: tableId,
+            source: 'pos'
+        })
+        
+        toast.success(`Order #${order.id} Created!`)
+        setCart([])
+        setSelectedItemUuid(null)
+        
+        // If we were on a specific table, maybe go back to tables or go to orders page
+        if (tableId) {
+            navigate('/pos/orders') // CHANGED: router.push -> navigate
+        }
+    } catch (e: any) {
+        console.error(e)
+        toast.error("Checkout failed", { description: e.message })
+    } finally {
+        setIsSubmitting(false)
+    }
+  }
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background font-sans text-foreground">
@@ -275,14 +284,21 @@ export default function PosRegister() {
         {/* HEADER */}
         <div className="flex-none bg-card border-b border-border z-10 shadow-sm">
           <div className="px-4 py-3 md:px-6 md:py-4">
-             <div className="relative max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search products..."
-                className="pl-10 h-10 bg-muted/30 border-input focus-visible:ring-1 focus-visible:ring-ring rounded-full text-sm shadow-none transition-all placeholder:text-muted-foreground"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+             <div className="relative max-w-md flex items-center gap-2">
+              {tableId && (
+                  <Badge variant="outline" className="h-10 px-3 border-dashed border-primary text-primary font-bold">
+                    Table {tableId}
+                  </Badge>
+              )}
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search products..."
+                  className="pl-10 h-10 bg-muted/30 border-input focus-visible:ring-1 focus-visible:ring-ring rounded-full text-sm shadow-none transition-all placeholder:text-muted-foreground"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
             </div>
           </div>
           
@@ -388,7 +404,7 @@ export default function PosRegister() {
             <div className="px-5 py-3 bg-muted/20 border-b border-border space-y-1">
                <div className="flex justify-between text-xs font-medium text-muted-foreground">
                   <span>Tax (10%)</span>
-                  <span>{formatMoney(tax)}</span>
+                  <span>{formatMoney(taxAmount)}</span>
                </div>
                <div className="flex justify-between items-end">
                   <span className="text-sm font-bold text-card-foreground">Total</span>
@@ -435,10 +451,14 @@ export default function PosRegister() {
                <CalcButton onClick={() => handleCalcNum(".")}>.</CalcButton>
                
                <button 
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg flex items-center justify-center transition-colors active:scale-[0.98]"
-                  onClick={() => toast.success(`Paid ${formatMoney(total)}`)}
+                  className={cn(
+                    "bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg flex items-center justify-center transition-colors active:scale-[0.98] disabled:opacity-50",
+                    isSubmitting && "opacity-80"
+                  )}
+                  onClick={handleCheckout}
+                  disabled={isSubmitting || cart.length === 0}
                >
-                  PAY
+                  {isSubmitting ? <Loader2 className="h-6 w-6 animate-spin" /> : "PAY"}
                </button>
             </div>
         </div>
@@ -504,7 +524,7 @@ export default function PosRegister() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Sub-Components                                                             */
+/* Sub-Components (Unchanged styling from your code)                          */
 /* -------------------------------------------------------------------------- */
 
 function ProductCard({ product, onClick }: { product: Product, onClick: () => void }) {
@@ -524,7 +544,7 @@ function ProductCard({ product, onClick }: { product: Product, onClick: () => vo
                    <span className="text-3xl font-bold text-muted-foreground/20">{product.name.slice(0,2).toUpperCase()}</span>
                 )}
                 <div className="absolute bottom-2 right-2 bg-card/95 backdrop-blur text-card-foreground text-xs font-bold px-2.5 py-1 rounded-full shadow-sm border border-border/50">
-                     {formatMoney(product.price)}
+                      {formatMoney(product.price)}
                 </div>
             </div>
             <div className="p-3 flex flex-col gap-1">
@@ -539,7 +559,7 @@ function ProductCard({ product, onClick }: { product: Product, onClick: () => vo
     )
 }
 
-function CartRow({ item, selected, onClick, onRemove }: { item: CartItem, selected: boolean, onClick: () => void, onRemove: () => void }) {
+function CartRow({ item, selected, onClick, onRemove }: { item: PosCartItem, selected: boolean, onClick: () => void, onRemove: () => void }) {
     const unitPrice = item.customPrice ?? item.product.price
     const total = unitPrice * item.quantity * (1 - item.discountPercent/100)
 
@@ -578,8 +598,8 @@ function CartRow({ item, selected, onClick, onRemove }: { item: CartItem, select
                 </span>
                 {selected && (
                   <button 
-                     onClick={(e) => { e.stopPropagation(); onRemove(); }}
-                     className="p-1.5 -mr-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
+                      onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                      className="p-1.5 -mr-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
                   >
                       <Trash2 className="h-4 w-4" />
                   </button>
