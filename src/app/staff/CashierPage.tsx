@@ -4,25 +4,23 @@ import * as React from "react"
 import { useNavigate } from "react-router-dom"
 import { 
   Bell, 
-  ChefHat, 
-  ForkKnife,
-  LogOut,
-  Sun,
-  Moon,
-  Clock,
-  Wifi,
-  WifiOff,
-  CheckCircle2,
-  ArrowRight,
-  Power,
-  ChevronLeft,
-  Users,
-  CreditCard,
-  Utensils,
-  Receipt,
-  Search,
-  Filter,
-  CalendarDays
+  LogOut, 
+  Sun, 
+  Moon, 
+  Clock, 
+  Wifi, 
+  WifiOff, 
+  CheckCircle2, 
+  ArrowRight, 
+  Power, 
+  ChevronLeft, 
+  Users, 
+  CreditCard, 
+  Search, 
+  CalendarDays,
+  Banknote,
+  Wallet,
+  Receipt
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -57,13 +55,13 @@ import PosTables from "../pos/PosTables"
 /* Types                                                                      */
 /* -------------------------------------------------------------------------- */
 
-type WaiterTask = {
+type CashierTask = {
   id: string
-  type: "claim" | "pickup" | "payment"
   title: string
   subtitle: string
   time: string
-  priority: "critical" | "high" | "medium"
+  amount: number
+  priority: "high" | "medium"
   refId: number
   order: Order
 }
@@ -72,31 +70,30 @@ type WaiterTask = {
 /* Main Component                                                             */
 /* -------------------------------------------------------------------------- */
 
-export default function WaiterPage() {
+export default function CashierPage() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useThemeToggle()
   
   const [isOnline, setIsOnline] = React.useState(false)
   const [activeTab, setActiveTab] = React.useState("feed")
-  const [tasks, setTasks] = React.useState<WaiterTask[]>([])
+  const [tasks, setTasks] = React.useState<CashierTask[]>([])
   const [isConnected, setIsConnected] = React.useState(false)
   
   // Dynamic Stats State
-  const [dailyStats, setDailyStats] = React.useState({ completed: 0, sales: 0 })
+  const [dailyStats, setDailyStats] = React.useState({ toCollect: 0, collected: 0, count: 0 })
 
   // Payment View State (Task Overlay)
-  const [selectedPaymentTask, setSelectedPaymentTask] = React.useState<WaiterTask | null>(null)
+  const [selectedPaymentTask, setSelectedPaymentTask] = React.useState<CashierTask | null>(null)
 
   // Safe User Data
   const userName = (user as any)?.name || "Staff"
-  const userRole = (user as any)?.role || "Waiter"
+  const userRole = (user as any)?.role || "Cashier"
   
   // -- Data Fetching & Logic --
   const refreshData = React.useCallback(async () => {
     if (!isOnline) return
     try {
-      // Fetch broader list to calculate daily stats correctly
       const [orderData] = await Promise.all([fetchOrders({ per_page: 100 })])
       const allOrders = Array.isArray(orderData) ? orderData : orderData.items
       
@@ -105,59 +102,40 @@ export default function WaiterPage() {
 
       // 1. Calculate Stats
       const completedOrders = todayOrders.filter(o => o.status === 'completed')
-      const totalSales = completedOrders.reduce((acc, o) => acc + o.total, 0)
-      setDailyStats({ completed: completedOrders.length, sales: totalSales })
+      const unpaidOrders = todayOrders.filter(o => o.status !== 'cancelled' && o.status !== 'completed' && o.payment_status === 'unpaid')
+      
+      const collected = completedOrders.reduce((acc, o) => acc + o.total, 0)
+      const toCollect = unpaidOrders.reduce((acc, o) => acc + o.total, 0)
 
-      // 2. Build Tasks
-      const newTasks: WaiterTask[] = []
+      setDailyStats({ count: completedOrders.length, collected, toCollect })
+
+      // 2. Build Payment Tasks (Feed)
+      const newTasks: CashierTask[] = []
       
       todayOrders.forEach(order => {
-        // 1. CLAIM TASK
-        if (order.status === 'pending' || (order.status === 'submitted' && !order.waiter)) {
+        // Condition: Not cancelled, not completed, and UNPAID
+        if (order.status !== 'cancelled' && order.status !== 'completed' && order.payment_status === 'unpaid') {
+             
+             // Priority logic: Served orders are waiting to leave (High priority)
+             const isPriority = order.status === 'served' || order.status === 'ready'
+
              newTasks.push({
-                id: `claim-${order.id}`,
-                type: 'claim',
-                title: `New Order • Table ${order.table?.name || '??'}`,
-                subtitle: `${order.items?.length || 0} Items • Waiting for confirmation`,
+                id: `pay-${order.id}`,
+                title: `Table ${order.table?.name || 'Takeout'}`,
+                subtitle: `Order #${order.id} • ${order.items?.length || 0} Items`,
                 time: getTimeDiff(order.opened_at),
-                priority: 'critical', 
+                amount: order.total,
+                priority: isPriority ? 'high' : 'medium',
                 refId: order.id,
                 order: order
              })
         }
-
-        // 2. PICKUP TASK
-        if (order.status === 'ready') {
-            newTasks.push({
-                id: `ready-${order.id}`,
-                type: 'pickup',
-                title: `Order Ready • Table ${order.table?.name || '??'}`,
-                subtitle: `Ticket #${order.id} • Pickup at Pass`,
-                time: getTimeDiff(order.opened_at), // Using opened_at for consistency or updated_at if available
-                priority: 'high',
-                refId: order.id,
-                order: order
-            })
-        }
-
-        // 3. PAYMENT TASK
-        if (order.status === 'served' && order.payment_status === 'unpaid') {
-            newTasks.push({
-                id: `pay-${order.id}`,
-                type: 'payment',
-                title: `Payment • Table ${order.table?.name || '??'}`,
-                subtitle: `Pending ${formatMoney(order.total)}`,
-                time: 'Active',
-                priority: 'medium',
-                refId: order.id,
-                order: order
-            })
-        }
       })
       
+      // Sort: High priority first, then oldest first
       setTasks(newTasks.sort((a,b) => {
-          const map = { critical: 0, high: 1, medium: 2 }
-          return map[a.priority] - map[b.priority]
+          if (a.priority === b.priority) return 0 // Keep stable sort or use time
+          return a.priority === 'high' ? -1 : 1
       }))
 
     } catch (e) { console.error("Refresh Error:", e) }
@@ -168,18 +146,14 @@ export default function WaiterPage() {
     let unsubscribe = () => {}
 
     if (isOnline) {
-      toast.success("Shift Started", { description: "Connected to Kitchen Display System." })
+      toast.success("Register Open", { description: "Ready to process transactions." })
       refreshData()
 
-      unsubscribe = subscribeToKitchen(1, {
-        onNewOrder: (order) => {
-            console.log("SOCKET: New Order", order)
-            toast("New Order Received", { icon: <Bell className="h-4 w-4 text-primary" /> })
-            refreshData()
-        },
-        onOrderStatusUpdated: (id, status, tableId) => {
-            console.log("SOCKET: Status Update", id, status, tableId)
-            if (status === 'ready') toast("Order Ready for Pickup!", { icon: <ChefHat className="h-4 w-4 text-orange-500" /> })
+      // Subscribe to all updates to catch status changes
+      unsubscribe = subscribeToKitchen(1, { // Assuming restaurantId 1 for now
+        onNewOrder: () => refreshData(),
+        onOrderStatusUpdated: (id, status) => {
+            if (status === 'served') toast("New Bill to Pay", { icon: <Banknote className="h-4 w-4 text-green-500" /> })
             refreshData()
         },
         onItemStatusUpdated: () => refreshData()
@@ -193,43 +167,18 @@ export default function WaiterPage() {
   }, [isOnline, refreshData])
 
   // -- Handlers --
-  const handleTaskAction = async (task: WaiterTask) => {
-      if (task.type === 'payment') {
-        setSelectedPaymentTask(task)
-        return
-      }
-
-      setTasks(prev => prev.filter(t => t.id !== task.id))
-      
-      try {
-          if (task.type === 'claim') {
-              await updateOrderStatus(task.refId, { 
-                status: 'preparing',
-                waiter_id: (user as any)?.id 
-              })
-              toast.success(`Sent to Kitchen`, { description: `Table ${task.order.table?.name}` })
-          }
-          
-          if (task.type === 'pickup') {
-              await updateOrderStatus(task.refId, { status: 'served' })
-              toast.success("Marked as Served")
-          }
-          
-          refreshData()
-      } catch (e) { 
-          toast.error("Update Failed", { description: "Please try again." })
-          refreshData() 
-      }
+  const handleTaskAction = (task: CashierTask) => {
+      setSelectedPaymentTask(task)
   }
 
-  const handlePaymentComplete = async (task: WaiterTask) => {
+  const handlePaymentComplete = async (task: CashierTask) => {
       try {
         await updateOrderStatus(task.refId, { status: 'completed' })
-        toast.success("Payment Processed", { description: `Order #${task.refId} closed.` })
+        toast.success("Transaction Approved", { description: `Order #${task.refId} closed successfully.` })
         setSelectedPaymentTask(null)
         refreshData()
       } catch (e) {
-        toast.error("Payment Failed", { description: "Could not close order." })
+        toast.error("Transaction Failed", { description: "Could not close order." })
       }
   }
 
@@ -239,6 +188,8 @@ export default function WaiterPage() {
   }
 
   // -- Render --
+  
+  // 1. Payment Overlay View
   if (selectedPaymentTask) {
     return (
       <OrderDetailView 
@@ -246,17 +197,18 @@ export default function WaiterPage() {
         onBack={() => setSelectedPaymentTask(null)}
         actionNode={
             <Button 
-                className="w-full h-12 text-base bg-green-600 hover:bg-green-700 text-white shadow-sm"
+                className="w-full h-12 text-base bg-green-600 hover:bg-green-700 text-white shadow-sm font-bold tracking-wide"
                 onClick={() => handlePaymentComplete(selectedPaymentTask)}
             >
                 <CreditCard className="mr-2 h-5 w-5" /> 
-                Complete Payment
+                CHARGE {formatMoney(selectedPaymentTask.amount)}
             </Button>
         }
       />
     )
   }
 
+  // 2. Standard View
   return (
     <div className="flex flex-col h-full w-full bg-muted/20 dark:bg-background transition-colors duration-300 font-sans selection:bg-primary/20">
       
@@ -265,15 +217,15 @@ export default function WaiterPage() {
           <div className="flex justify-between items-center mb-3">
                <div>
                   <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                    {activeTab === 'feed' ? 'Live Tasks' : activeTab === 'tables' ? 'Floor Plan' : 'Today\'s Orders'}
+                    {activeTab === 'feed' ? 'Cashier Dashboard' : activeTab === 'tables' ? 'Floor Plan' : 'Transactions'}
                   </h1>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="relative flex h-2.5 w-2.5">
-                      {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>}
-                      <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", isOnline ? "bg-primary" : "bg-muted-foreground/30")}></span>
+                      {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>}
+                      <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", isOnline ? "bg-emerald-500" : "bg-muted-foreground/30")}></span>
                     </span>
                     <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        {isOnline ? (isConnected ? "Online" : "Connecting...") : "Offline"}
+                        {isOnline ? (isConnected ? "Register Online" : "Connecting...") : "Register Closed"}
                     </span>
                   </div>
                </div>
@@ -281,15 +233,15 @@ export default function WaiterPage() {
                <div className="flex items-center gap-3">
                   <div className={cn(
                       "flex items-center gap-2 p-1 pl-3 pr-1 rounded-full border transition-all duration-300",
-                      isOnline ? "bg-primary/10 border-primary/20" : "bg-muted/50 border-border"
+                      isOnline ? "bg-emerald-500/10 border-emerald-500/20" : "bg-muted/50 border-border"
                   )}>
-                      <span className={cn("text-[10px] font-bold uppercase", isOnline ? "text-primary" : "text-muted-foreground")}>
-                          {isOnline ? "Shift On" : "Shift Off"}
+                      <span className={cn("text-[10px] font-bold uppercase", isOnline ? "text-emerald-600" : "text-muted-foreground")}>
+                          {isOnline ? "Open" : "Closed"}
                       </span>
                       <Switch 
                         checked={isOnline} 
                         onCheckedChange={setIsOnline} 
-                        className="data-[state=checked]:bg-primary scale-90" 
+                        className="data-[state=checked]:bg-emerald-600 scale-90" 
                       />
                   </div>
                   
@@ -323,9 +275,9 @@ export default function WaiterPage() {
 
           {activeTab === 'feed' && isOnline && (
              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar animate-in slide-in-from-top-1 fade-in duration-300">
-                 <StatChip label="Pending" value={tasks.length} active />
-                 <StatChip label="Completed" value={dailyStats.completed} />
-                 <StatChip label="Total Sales" value={formatMoney(dailyStats.sales)} />
+                 <StatChip label="Due Bills" value={tasks.length} active />
+                 <StatChip label="To Collect" value={formatMoney(dailyStats.toCollect)} warning />
+                 <StatChip label="Collected" value={formatMoney(dailyStats.collected)} success />
              </div>
           )}
       </header>
@@ -338,7 +290,7 @@ export default function WaiterPage() {
                   {!isOnline ? (
                       <OfflineToggleScreen onStart={() => setIsOnline(true)} />
                   ) : (
-                      <TaskFeed tasks={tasks} onAction={handleTaskAction} />
+                      <PaymentFeed tasks={tasks} onAction={handleTaskAction} />
                   )}
               </TabsContent>
 
@@ -346,7 +298,7 @@ export default function WaiterPage() {
                     <div className="h-full pb-20"><PosTables /></div>
               </TabsContent>
               <TabsContent value="orders" className="h-full mt-0 data-[state=inactive]:hidden">
-                    <WaiterOrdersSection user={user} />
+                    <CashierHistorySection />
               </TabsContent>
           </Tabs>
       </main>
@@ -355,9 +307,9 @@ export default function WaiterPage() {
       {isOnline && (
           <div className="absolute bottom-6 left-0 right-0 flex justify-center z-50 pointer-events-none animate-in slide-in-from-bottom-6 fade-in duration-500">
              <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
-                 <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Bell} label="" badge={tasks.length} />
+                 <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Banknote} label="Pay" badge={tasks.length} />
                  <div className="w-px h-5 bg-border mx-1" />
-                 <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={ForkKnife} label="Orders" />
+                 <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={Receipt} label="Txns" />
              </nav>
           </div>
       )}
@@ -366,35 +318,25 @@ export default function WaiterPage() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* WAITER ORDERS SECTION (Filtered by Today & Waiter)                         */
+/* CASHIER HISTORY SECTION                                                    */
 /* -------------------------------------------------------------------------- */
 
-function WaiterOrdersSection({ user }: { user: any }) {
+function CashierHistorySection() {
     const [orders, setOrders] = React.useState<Order[]>([])
-    const [tab, setTab] = React.useState<"active" | "history">("active")
+    const [tab, setTab] = React.useState<"all" | "completed">("all")
     const [search, setSearch] = React.useState("")
     const [selectedId, setSelectedId] = React.useState<number | null>(null)
     const [isMobileList, setIsMobileList] = React.useState(true)
 
-    // Fetch Orders
     const loadOrders = React.useCallback(async () => {
         try {
             const res = await fetchOrders({ per_page: 100 })
             const allOrders = res.items || []
-            
-            // 1. Filter by Current Waiter
-            const waiterOrders = user?.id 
-                ? allOrders.filter(o => o.waiter?.id === user.id) 
-                : allOrders
-
-            // 2. Filter by Today
-            const todayOrders = waiterOrders.filter(o => isToday(o.opened_at))
-
+            // Cashier sees ALL orders from Today
+            const todayOrders = allOrders.filter(o => isToday(o.opened_at))
             setOrders(todayOrders)
-        } catch (e) {
-            console.error(e)
-        }
-    }, [user])
+        } catch (e) { console.error(e) }
+    }, [])
 
     React.useEffect(() => {
         loadOrders()
@@ -404,10 +346,8 @@ function WaiterOrdersSection({ user }: { user: any }) {
 
     const filteredOrders = React.useMemo(() => {
         let list = orders
-        if (tab === "active") {
-            list = list.filter(o => !["completed", "cancelled"].includes(o.status))
-        } else {
-            list = list.filter(o => ["completed", "cancelled"].includes(o.status))
+        if (tab === "completed") {
+            list = list.filter(o => o.status === "completed")
         }
         if (search) {
             const q = search.toLowerCase()
@@ -438,19 +378,19 @@ function WaiterOrdersSection({ user }: { user: any }) {
                     <div className="flex items-center justify-between">
                         <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
                             <TabsList className="grid w-full grid-cols-2 bg-muted/50">
-                                <TabsTrigger value="active">Active</TabsTrigger>
-                                <TabsTrigger value="history">History</TabsTrigger>
+                                <TabsTrigger value="all">All Today</TabsTrigger>
+                                <TabsTrigger value="completed">Paid</TabsTrigger>
                             </TabsList>
                         </Tabs>
                     </div>
                     <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted-foreground bg-muted/20 rounded-md">
                         <CalendarDays className="h-3 w-3" />
-                        <span>Showing orders for Today</span>
+                        <span>Daily Transactions</span>
                     </div>
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input 
-                            placeholder="Search table, ID..." 
+                            placeholder="Search amount, ID..." 
                             className="pl-9 bg-muted/30 border-input"
                             value={search}
                             onChange={e => setSearch(e.target.value)}
@@ -464,7 +404,7 @@ function WaiterOrdersSection({ user }: { user: any }) {
                             {filteredOrders.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-2 opacity-50">
                                     <Clock className="h-12 w-12 stroke-[1.5]" />
-                                    <p className="text-sm">No orders found for today</p>
+                                    <p className="text-sm">No transactions found</p>
                                 </div>
                             ) : (
                                 filteredOrders.map(order => (
@@ -490,16 +430,21 @@ function WaiterOrdersSection({ user }: { user: any }) {
                     <OrderDetailView 
                         order={selectedOrder} 
                         onBack={() => setIsMobileList(true)}
-                        actionNode={null} 
+                        actionNode={
+                            // Allow Re-printing even if paid
+                            <Button variant="outline" className="w-full h-12 border-primary/20 text-primary hover:bg-primary/5">
+                                <Receipt className="mr-2 h-5 w-5" /> Reprint Receipt
+                            </Button>
+                        } 
                     />
                 ) : (
                     <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-muted/5">
                         <div className="h-24 w-24 rounded-full bg-muted/50 border border-border flex items-center justify-center mb-6 shadow-sm">
-                            <ArrowRight className="h-10 w-10 opacity-30 text-foreground" />
+                            <Wallet className="h-10 w-10 opacity-30 text-foreground" />
                         </div>
-                        <h3 className="text-xl font-semibold text-foreground mb-2">No Order Selected</h3>
+                        <h3 className="text-xl font-semibold text-foreground mb-2">Transaction Details</h3>
                         <p className="max-w-sm text-muted-foreground text-sm">
-                            Select an order from today's list to view details.
+                            Select a transaction to view receipt details.
                         </p>
                     </div>
                 )}
@@ -509,9 +454,122 @@ function WaiterOrdersSection({ user }: { user: any }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Shared Views & Helpers                                                     */
+/* Sub-Components                                                             */
 /* -------------------------------------------------------------------------- */
 
+function OfflineToggleScreen({ onStart }: { onStart: () => void }) {
+    return (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-6 bg-background/60 backdrop-blur-sm animate-in fade-in zoom-in-95 duration-300">
+            <div className="relative mb-8">
+                <div className="absolute inset-0 bg-emerald-500/20 blur-3xl rounded-full" />
+                <div className="relative h-24 w-24 bg-card rounded-3xl shadow-xl border border-border flex items-center justify-center rotate-3 transition-transform hover:rotate-0">
+                    <WifiOff className="h-10 w-10 text-muted-foreground" />
+                </div>
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight text-foreground">Register Closed</h2>
+            <p className="text-muted-foreground text-center max-w-[260px] mt-2 mb-10 leading-relaxed">
+                Open the register to start accepting payments.
+            </p>
+            <div className="flex items-center gap-4 bg-card p-2 pr-6 pl-2 rounded-full border border-border shadow-lg hover:shadow-xl transition-all cursor-pointer group" onClick={onStart}>
+                <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors">
+                    <Power className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Swipe to</span>
+                    <span className="text-sm font-bold text-foreground">Open Register</span>
+                </div>
+                <Switch checked={false} onCheckedChange={(c) => c && onStart()} className="ml-2 data-[state=checked]:bg-emerald-600" />
+            </div>
+        </div>
+    )
+}
+
+function PaymentFeed({ tasks, onAction }: { tasks: CashierTask[], onAction: (t: CashierTask) => void }) {
+    if (tasks.length === 0) return (
+        <div className="h-full flex flex-col items-center justify-center p-8 animate-in fade-in zoom-in-95">
+             <div className="h-20 w-20 bg-emerald-500/5 rounded-full flex items-center justify-center mb-4 ring-1 ring-emerald-500/10">
+                <CheckCircle2 className="h-9 w-9 text-emerald-500/60" />
+             </div>
+             <h3 className="text-lg font-semibold text-foreground">All Paid Up</h3>
+             <p className="text-muted-foreground text-sm mt-1">No pending bills for today.</p>
+        </div>
+    )
+
+    return (
+        <ScrollArea className="h-full bg-muted/10">
+            <div className="px-4 py-4 space-y-4 pb-32">
+                <div className="flex items-center justify-between px-1">
+                     <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Payments Due</span>
+                     <Badge variant="secondary" className="bg-background border border-border">{tasks.length}</Badge>
+                </div>
+                {tasks.map((task, i) => (
+                    <PaymentCard key={task.id} task={task} onAction={onAction} index={i} />
+                ))}
+            </div>
+        </ScrollArea>
+    )
+}
+
+function PaymentCard({ task, onAction, index }: { task: CashierTask, onAction: (t: CashierTask) => void, index: number }) {
+    const isPriority = task.priority === 'high'
+
+    return (
+        <div 
+            className="group relative flex flex-col bg-card border border-border shadow-sm rounded-xl overflow-hidden active:scale-[0.99] transition-all duration-200"
+            style={{ animation: `slideUp 0.3s ease-out ${index * 0.05}s backwards` }}
+        >
+            <div className={cn("absolute left-0 top-0 bottom-0 w-1.5 z-10", 
+                isPriority ? "bg-emerald-500" : "bg-blue-500"
+            )} />
+
+            <div className="flex justify-between items-start p-4 pb-2 pl-5">
+                <div className="flex items-center gap-3">
+                    <div className={cn("h-11 w-11 rounded-lg flex items-center justify-center font-bold text-lg border bg-muted/20",
+                        isPriority ? "text-emerald-600 border-emerald-500/20 bg-emerald-500/5" : "text-foreground border-border"
+                    )}>
+                        {task.order.table?.id || '#'}
+                    </div>
+                    <div>
+                        <h4 className="font-bold text-[15px] leading-tight text-foreground">{task.title}</h4>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground font-mono">
+                            <span className="bg-muted px-1.5 rounded-sm">#{task.refId}</span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {task.time}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Jagged Line Separator */}
+            <div className="relative my-2 pl-1.5">
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 -left-1.5 w-3 h-3 rounded-full bg-muted/10 border-r border-border z-20" />
+                <div className="border-t-2 border-dashed border-border/60 w-full" />
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 -right-1.5 w-3 h-3 rounded-full bg-muted/10 border-l border-border z-20" />
+            </div>
+
+            <div className="px-4 pb-4 pl-5">
+                <div className="flex justify-between items-end mb-1">
+                    <span className="text-sm text-muted-foreground">Total Due</span>
+                    <span className="text-xl font-extrabold text-foreground tracking-tight">{formatMoney(task.amount)}</span>
+                </div>
+            </div>
+
+            <div className="px-4 pb-4 pt-0 pl-5">
+                <Button 
+                    onClick={() => onAction(task)} 
+                    className={cn("w-full font-semibold shadow-sm h-11 rounded-lg text-sm", 
+                        isPriority ? "bg-emerald-600 text-white hover:bg-emerald-700" : 
+                        "bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"
+                    )}
+                >
+                    Process Payment <ArrowRight className="ml-auto h-4 w-4 opacity-50" />
+                </Button>
+            </div>
+        </div>
+    )
+}
+
+// Reusing Helpers and Shared Views
 function isToday(dateStr: string | null) {
     if (!dateStr) return false
     const date = new Date(dateStr)
@@ -521,14 +579,12 @@ function isToday(dateStr: string | null) {
            date.getFullYear() === today.getFullYear()
 }
 
-// Unified Order Detail View
 function OrderDetailView({ order, onBack, actionNode }: { order: Order, onBack: () => void, actionNode?: React.ReactNode }) {
     const tax = (order.subtotal || 0) * 0.10
     const total = order.total
 
     return (
         <div className="flex flex-col h-full w-full bg-card animate-in slide-in-from-right duration-300">
-            {/* Header */}
             <div className="flex-none h-16 flex items-center justify-between px-4 border-b border-border bg-card z-20">
                 <div className="flex items-center gap-3">
                     <Button variant="ghost" size="icon" onClick={onBack} className="-ml-2 md:hidden">
@@ -548,7 +604,6 @@ function OrderDetailView({ order, onBack, actionNode }: { order: Order, onBack: 
                 </div>
             </div>
 
-            {/* Items List */}
             <div className="flex-1 overflow-hidden bg-card relative">
                 <ScrollArea className="h-full">
                     <div className="pb-24">
@@ -580,7 +635,6 @@ function OrderDetailView({ order, onBack, actionNode }: { order: Order, onBack: 
                 </ScrollArea>
             </div>
 
-            {/* Footer */}
             <div className="shrink-0 flex flex-col border-t border-border bg-card pb-[safe]">
                 <div className="px-5 py-3 bg-muted/20 border-b border-border space-y-1">
                     <div className="flex justify-between text-xs font-medium text-muted-foreground">
@@ -648,6 +702,36 @@ function OrderListItem({ order, active, onClick }: { order: Order, active: boole
     )
 }
 
+function NavBarItem({ active, onClick, icon: Icon, badge, label }: any) {
+    return (
+        <button onClick={onClick} className={cn(
+            "relative px-5 py-2.5 rounded-full transition-all duration-300 flex items-center gap-2 group",
+            active ? "bg-emerald-500/10 text-emerald-600" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+        )}>
+            <Icon className={cn("h-5 w-5", active && "fill-current")} strokeWidth={active ? 2.5 : 2} />
+            {active && <span className="text-xs font-bold animate-in fade-in slide-in-from-left-2 duration-200">{label}</span>}
+            
+            {badge > 0 && (
+                <span className="absolute top-2 right-3 h-2 w-2 bg-destructive rounded-full ring-2 ring-background animate-pulse" />
+            )}
+        </button>
+    )
+}
+
+function StatChip({ label, value, active, success, warning }: any) {
+    return (
+        <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors whitespace-nowrap",
+            active ? "bg-primary text-primary-foreground border-primary" :
+            success ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20" :
+            warning ? "bg-amber-500/10 text-amber-700 border-amber-500/20" :
+            "bg-background border-border text-muted-foreground"
+        )}>
+            <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">{label}</span>
+            <span className="text-sm font-bold">{value}</span>
+        </div>
+    )
+}
+
 function StatusBadge({ status, mini }: { status: string, mini?: boolean }) {
     const styles = {
       pending: "bg-slate-100 text-slate-700 dark:bg-slate-900/50 dark:text-slate-300 border-slate-200 dark:border-slate-700",
@@ -672,167 +756,6 @@ function StatusBadge({ status, mini }: { status: string, mini?: boolean }) {
       <Badge variant="outline" className={cn("capitalize border shadow-none", styles)}>
         {label}
       </Badge>
-    )
-}
-
-function OfflineToggleScreen({ onStart }: { onStart: () => void }) {
-    return (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-6 bg-background/60 backdrop-blur-sm animate-in fade-in zoom-in-95 duration-300">
-            <div className="relative mb-8">
-                <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full" />
-                <div className="relative h-24 w-24 bg-card rounded-3xl shadow-xl border border-border flex items-center justify-center rotate-3 transition-transform hover:rotate-0">
-                    <WifiOff className="h-10 w-10 text-muted-foreground" />
-                </div>
-            </div>
-
-            <h2 className="text-2xl font-bold tracking-tight text-foreground">You are Offline</h2>
-            <p className="text-muted-foreground text-center max-w-[260px] mt-2 mb-10 leading-relaxed">
-                Sync with the kitchen and start receiving your tickets.
-            </p>
-
-            <div className="flex items-center gap-4 bg-card p-2 pr-6 pl-2 rounded-full border border-border shadow-lg hover:shadow-xl transition-all cursor-pointer group" onClick={onStart}>
-                <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                    <Power className="h-5 w-5 text-muted-foreground group-hover:text-primary" />
-                </div>
-                <div className="flex flex-col">
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Swipe to</span>
-                    <span className="text-sm font-bold text-foreground">Start Shift</span>
-                </div>
-                <Switch 
-                    checked={false} 
-                    onCheckedChange={(c) => c && onStart()} 
-                    className="ml-2 data-[state=checked]:bg-primary" 
-                />
-            </div>
-        </div>
-    )
-}
-
-function TaskFeed({ tasks, onAction }: { tasks: WaiterTask[], onAction: (t: WaiterTask) => void }) {
-    if (tasks.length === 0) return (
-        <div className="h-full flex flex-col items-center justify-center p-8 animate-in fade-in zoom-in-95">
-             <div className="h-20 w-20 bg-primary/5 rounded-full flex items-center justify-center mb-4 ring-1 ring-primary/10">
-                <CheckCircle2 className="h-9 w-9 text-primary/60" />
-             </div>
-             <h3 className="text-lg font-semibold text-foreground">All Clear</h3>
-             <p className="text-muted-foreground text-sm mt-1">No active tickets.</p>
-        </div>
-    )
-
-    return (
-        <ScrollArea className="h-full bg-muted/10">
-            <div className="px-4 py-4 space-y-4 pb-32">
-                <div className="flex items-center justify-between px-1">
-                     <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Incoming Tickets</span>
-                     <Badge variant="secondary" className="bg-background border border-border">{tasks.length}</Badge>
-                </div>
-                {tasks.map((task, i) => (
-                    <TicketCard key={task.id} task={task} onAction={onAction} index={i} />
-                ))}
-            </div>
-        </ScrollArea>
-    )
-}
-
-function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t: WaiterTask) => void, index: number }) {
-    const isCritical = task.priority === 'critical' // Claim / New
-    const itemsSummary = task.order.items?.map(i => `${i.quantity}x ${i.product?.name}`).join(', ') || "Items loading..."
-
-    return (
-        <div 
-            className="group relative flex flex-col bg-card border border-border shadow-sm rounded-xl overflow-hidden active:scale-[0.99] transition-all duration-200"
-            style={{ animation: `slideUp 0.3s ease-out ${index * 0.05}s backwards` }}
-        >
-            <div className={cn("absolute left-0 top-0 bottom-0 w-1.5 z-10", 
-                isCritical ? "bg-primary" : 
-                task.type === 'pickup' ? "bg-orange-500" : "bg-emerald-500"
-            )} />
-
-            <div className="flex justify-between items-start p-4 pb-2 pl-5">
-                <div className="flex items-center gap-3">
-                    <div className={cn("h-11 w-11 rounded-lg flex items-center justify-center font-bold text-lg border bg-muted/20",
-                        isCritical ? "text-primary border-primary/20 bg-primary/5" : "text-foreground border-border"
-                    )}>
-                        {task.order.table?.id || '#'}
-                    </div>
-                    <div>
-                        <h4 className="font-bold text-[15px] leading-tight text-foreground">{task.title}</h4>
-                        <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground font-mono">
-                            <span className="bg-muted px-1.5 rounded-sm">#{task.refId}</span>
-                            <span>•</span>
-                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {task.time}</span>
-                        </div>
-                    </div>
-                </div>
-                {isCritical && (
-                    <span className="flex h-2.5 w-2.5">
-                        <span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-primary opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary"></span>
-                    </span>
-                )}
-            </div>
-
-            <div className="relative my-2 pl-1.5">
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 -left-1.5 w-3 h-3 rounded-full bg-muted/10 border-r border-border z-20" />
-                <div className="border-t-2 border-dashed border-border/60 w-full" />
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 -right-1.5 w-3 h-3 rounded-full bg-muted/10 border-l border-border z-20" />
-            </div>
-
-            <div className="px-4 pb-4 pl-5">
-                <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
-                    {itemsSummary}
-                </p>
-                {task.order.items && task.order.items.length > 2 && (
-                    <span className="text-[10px] font-medium text-primary mt-1 block">
-                        + {task.order.items.length - 2} more items...
-                    </span>
-                )}
-            </div>
-
-            <div className="px-4 pb-4 pt-0 pl-5">
-                <Button 
-                    onClick={() => onAction(task)} 
-                    className={cn("w-full font-semibold shadow-sm h-11 rounded-lg text-sm", 
-                        isCritical ? "bg-primary text-primary-foreground hover:bg-primary/90" : 
-                        "bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"
-                    )}
-                >
-                    {task.type === 'claim' && "Send to Kitchen"}
-                    {task.type === 'pickup' && "Confirm Served"}
-                    {task.type === 'payment' && "Process Payment"}
-                    <ArrowRight className="ml-auto h-4 w-4 opacity-50" />
-                </Button>
-            </div>
-        </div>
-    )
-}
-
-function NavBarItem({ active, onClick, icon: Icon, badge, label }: any) {
-    return (
-        <button onClick={onClick} className={cn(
-            "relative px-5 py-2.5 rounded-full transition-all duration-300 flex items-center gap-2 group",
-            active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-        )}>
-            <Icon className={cn("h-5 w-5", active && "fill-current")} strokeWidth={active ? 2.5 : 2} />
-            {active && <span className="text-xs font-bold animate-in fade-in slide-in-from-left-2 duration-200">{label}</span>}
-            
-            {badge > 0 && (
-                <span className="absolute top-2 right-3 h-2 w-2 bg-destructive rounded-full ring-2 ring-background animate-pulse" />
-            )}
-        </button>
-    )
-}
-
-function StatChip({ label, value, active }: any) {
-    return (
-        <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors whitespace-nowrap",
-            active 
-                ? "bg-primary text-primary-foreground border-primary" 
-                : "bg-background border-border text-muted-foreground"
-        )}>
-            <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">{label}</span>
-            <span className="text-sm font-bold">{value}</span>
-        </div>
     )
 }
 

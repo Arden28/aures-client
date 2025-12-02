@@ -37,6 +37,8 @@ const PosRegister = React.lazy(() => import("@/app/pos/PosRegister"))
 const KDS = React.lazy(() => import("@/app/pos/KDS"))
 const PosOrders = React.lazy(() => import("@/app/pos/PosOrders"))
 const WaiterPage = React.lazy(() => import("@/app/staff/WaiterPage"))
+const CashierPage = React.lazy(() => import("@/app/staff/CashierPage"))
+const KitchenPage = React.lazy(() => import("@/app/staff/KitchenPage"))
 
 // Portal
 const PortalPage = React.lazy(() => import("@/app/portal/PortalPage"))
@@ -92,20 +94,16 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           {
-            element: <RequireAuth />, // any logged-in user
+            element: <RequireAuth />, // must be logged in
             children: [
-              // "/" → "/dashboard"
-              { index: true, element: <Navigate to="dashboard" replace /> },
-
-              // Dashboard open to all authenticated roles
-              { path: "dashboard", element: withSuspense(<Dashboard />) },
-
-              // Owner + Manager only
               {
-                element: (
-                  <RequireRole allowed={["owner", "manager"]} />
-                ),
+                element: <RequireRole allowed={["owner", "manager"]} />, // only owner + manager
                 children: [
+                  // "/" → "/dashboard"
+                  { index: true, element: <Navigate to="dashboard" replace /> },
+
+                  { path: "dashboard", element: withSuspense(<Dashboard />) },
+
                   // Menu
                   { path: "menu/products", element: withSuspense(<Products />) },
                   { path: "menu/categories", element: withSuspense(<Categories />) },
@@ -126,38 +124,49 @@ export const router = createBrowserRouter([
             ],
           },
         ],
-      },
+      },  
+
 
       /* ----------------------------- POS ROUTES --------------------------- */
       {
-        path: "/pos",
+        path: "/",
         element: <PosLayout />,
         children: [
           {
-            // 1. Require Login
-            element: <RequireAuth />, 
+            element: <RequireAuth />, // must be logged in
             children: [
+              // WAITER ONLY
               {
-                // 2. Require specific POS roles (waiter, kitchen, cashier)
-                element: <RequireRole allowed={["waiter", "kitchen", "cashier"]} />,
+                path: "waiter",
+                element: <RequireRole allowed={["waiter"]} />,
                 children: [
-                  // default -> tables
-                  { index: true, element: <Navigate to="tables" replace /> },
+                  { index: true, element: withSuspense(<WaiterPage />) },
+                ],
+              },
 
-                  { path: "tables", element: withSuspense(<PosTables />) },
-                  { path: "register", element: withSuspense(<PosRegister />) },
-                  { path: "orders", element: withSuspense(<PosOrders />) },
-                  { path: "billing", element: withSuspense(<PosBilling />) },
-                  { path: "waiter", element: withSuspense(<WaiterPage />) },
-                  
-                  // Changed "kitchen" to "kds" to match PosLayout link logic
-                  { path: "kitchen", element: withSuspense(<KDS />) },
-                ]
-              }
+              // CASHIER ONLY
+              {
+                path: "cashier",
+                element: <RequireRole allowed={["cashier"]} />,
+                children: [
+                  { index: true, element: withSuspense(<CashierPage />) },
+                ],
+              },
+
+              // KITCHEN ONLY
+              {
+                path: "kitchen",
+                element: <RequireRole allowed={["kitchen"]} />,
+                children: [
+                  { index: true, element: withSuspense(<KDS />) },
+                ],
+              },
             ],
           },
         ],
       },
+
+
 
       /* ----------------------------- PORTAL ROUTES --------------------------- */
       {

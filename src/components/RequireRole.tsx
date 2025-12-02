@@ -1,4 +1,3 @@
-// src/components/RequireRole.tsx
 import * as React from "react"
 import { Navigate, Outlet, useLocation } from "react-router-dom"
 import useAuth from "@/hooks/useAuth"
@@ -15,20 +14,24 @@ type RequireRoleProps = {
   allowed: AllowedRole[]
 }
 
-/**
- * RequireRole
- * - assumes the user is already authenticated (wrap inside <RequireAuth />)
- * - if role not allowed -> redirect to /dashboard
- */
+// Map each role to its home route
+const roleRedirect: Record<AllowedRole, string> = {
+  owner: "/dashboard",
+  manager: "/dashboard",
+  waiter: "/waiter",
+  cashier: "/cashier",
+  kitchen: "/kitchen",
+  client: "/portal", // or wherever clients go
+}
+
 export default function RequireRole({ allowed }: RequireRoleProps) {
   const { user, status } = useAuth()
   const location = useLocation()
 
   const isLoading = status === "loading"
-
   if (isLoading) return null
 
-  // If somehow no user, send them to login
+  // No user → redirect to login
   if (!user) {
     return (
       <Navigate
@@ -39,12 +42,13 @@ export default function RequireRole({ allowed }: RequireRoleProps) {
     )
   }
 
-  const role = user.role as AllowedRole | undefined
+  const role = user.role as AllowedRole
 
-  // If role is missing or not in allowed list → bounce to dashboard
-  if (!role || !allowed.includes(role)) {
-    return <Navigate to="/dashboard" replace />
+  // Role is not allowed here → send them to THEIR correct home page
+  if (!allowed.includes(role)) {
+    return <Navigate to={roleRedirect[role]} replace />
   }
 
+  // Role allowed → render this route
   return <Outlet />
 }

@@ -28,6 +28,25 @@ export interface AuthContextShape {
 
 export const AuthContext = createContext<AuthContextShape | undefined>(undefined)
 
+// 🔹 Helper: decide home route based on role
+function getHomeRouteForRole(role?: string | null): string {
+  switch (role) {
+    case "owner":
+    case "manager":
+      return "/dashboard"
+    case "waiter":
+      return "/waiter"
+    case "cashier":
+      return "/cashier"
+    case "kitchen":
+      return "/kitchen"
+    case "client":
+      return "/" // or "/portal" if you prefer
+    default:
+      return "/" // fallback
+  }
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number) {
   return Promise.race<T>([
     p,
@@ -83,9 +102,14 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
       try {
         await auth.login<AppUser>({ email, password, device }, "/v1/auth/login")
         const me = await auth.fetchUser<AppUser>("/v1/auth/me")
+
         setUser(me)
         setStatus("authenticated")
-        navigate("/")
+
+        // 🔹 Use the same role-based redirect logic as RequireRole
+        const role = me?.role ?? me?.roles?.[0] ?? null
+        const target = getHomeRouteForRole(role)
+        navigate(target)
       } catch (err) {
         setUser(null)
         setStatus("unauthenticated")
