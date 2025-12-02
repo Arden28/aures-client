@@ -252,12 +252,6 @@ export default function PosOrders() {
         
         {/* Header & Search */}
         <div className="flex-none p-4 border-b border-border space-y-4 bg-card">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold tracking-tight text-card-foreground">Orders</h2>
-            <Button variant="outline" size="icon" className="h-8 w-8 border-input" onClick={loadOrders}>
-               <Filter className="h-4 w-4" />
-            </Button>
-          </div>
 
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
             <TabsList className="grid w-full grid-cols-2 bg-muted/50">

@@ -111,9 +111,11 @@ export type OrderCreatePayload = {
 
 /**
  * Mirrors UpdateOrderStatusRequest
+ * Added waiter_id to assign waiter on claim
  */
 export type OrderStatusUpdatePayload = {
   status: OrderStatusValue
+  waiter_id?: number 
 }
 
 /**

@@ -73,7 +73,7 @@ export async function updateKDSItemStatus(itemId: number, status: OrderItemStatu
 
 type KDSCallbacks = {
     onNewOrder: (order: KDSOrder) => void
-    onOrderStatusUpdated: (orderId: number, newStatus: OrderStatusValue) => void
+    onOrderStatusUpdated: (orderId: number, newStatus: OrderStatusValue, tableId?: number) => void
     onItemStatusUpdated: (orderId: number, itemId: number, newStatus: OrderItemStatusValue) => void
 }
 
@@ -89,7 +89,6 @@ export function subscribeToKitchen(restaurantId: number, callbacks: KDSCallbacks
     const channel = echo.private(channelName)
 
     // 1. New Order Placed
-    // Note: Laravel 'broadcastAs' returning 'order.created' usually maps to '.order.created' in Echo
     channel.listen('.order.created', (e: any) => {
         console.log('🎟️ New Order Event:', e)
         if (e.order) {
@@ -99,11 +98,13 @@ export function subscribeToKitchen(restaurantId: number, callbacks: KDSCallbacks
         }
     })
 
-    // 2. Order Moved
+    // 2. Order Moved (Updated for specific payload)
     channel.listen('.order.status.updated', (e: any) => {
+        // Payload: { order_id: 53, table_id: 12, old_status: 'pending', new_status: 'preparing' }
         console.log('📋 Order Status Update:', e)
+        
         if (e.order_id && e.new_status) {
-            callbacks.onOrderStatusUpdated(e.order_id, e.new_status)
+            callbacks.onOrderStatusUpdated(e.order_id, e.new_status, e.table_id)
         }
     })
 

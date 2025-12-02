@@ -36,6 +36,7 @@ const PosBilling = React.lazy(() => import("@/app/pos/PosBilling"))
 const PosRegister = React.lazy(() => import("@/app/pos/PosRegister"))
 const KDS = React.lazy(() => import("@/app/pos/KDS"))
 const PosOrders = React.lazy(() => import("@/app/pos/PosOrders"))
+const WaiterPage = React.lazy(() => import("@/app/staff/WaiterPage"))
 
 // Portal
 const PortalPage = React.lazy(() => import("@/app/portal/PortalPage"))
@@ -147,6 +148,7 @@ export const router = createBrowserRouter([
                   { path: "register", element: withSuspense(<PosRegister />) },
                   { path: "orders", element: withSuspense(<PosOrders />) },
                   { path: "billing", element: withSuspense(<PosBilling />) },
+                  { path: "waiter", element: withSuspense(<WaiterPage />) },
                   
                   // Changed "kitchen" to "kds" to match PosLayout link logic
                   { path: "kitchen", element: withSuspense(<KDS />) },
