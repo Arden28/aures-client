@@ -31,6 +31,7 @@ export type MiniRef = {
 
 export type OrderItemMini = {
   id: number
+  name: string | null
   order_id: number
   product?: { id: number; name: string; price: number } | null
   quantity: number
