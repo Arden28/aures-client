@@ -20,24 +20,24 @@ import {
  * Retains the ChevronsUpDown icon for visual consistency/indicator.
  */
 export function TeamSwitcher() {
-  const { isCollapsed } = useSidebar() 
+  const { isMobile } = useSidebar()
   
   // NOTE: Assuming '/images/logo-icon.png' is your small iconed logo 
   // and '/images/logo.png' is the full wordmark logo.
   const fullLogoPath = "/images/logo.png"
-  const iconLogoPath = "/images/logo-icon.png" // Placeholder for your secondary/icon logo
+  const iconLogoPath = "/images/logo.png" // Placeholder for your secondary/icon logo
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
         {/* We keep the SidebarMenuButton to maintain layout and styling */}
         <SidebarMenuButton
-          size="md"
+          size="sm"
           // We remove data-[state=open] styles as there is no 'open' state anymore
           className="hover:bg-sidebar-accent/10 cursor-default" 
         >
           
-          {isCollapsed ? (
+          {isMobile ? (
             // 1. Collapsed State: Show icon-only logo
             <div className="bg-sidebar-primary/10 flex aspect-square size-8 items-center justify-center rounded-lg">
               <img 

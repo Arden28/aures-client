@@ -94,8 +94,8 @@ export default function KDS() {
   const restaurantId = 1 
   
   // Safe User Data
-  const userName = user.name
-  const userRole = user.role
+  const userName = user?.name
+  const userRole = user?.role
 
   // Sync ref with state
   React.useEffect(() => {

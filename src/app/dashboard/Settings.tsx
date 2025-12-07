@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/command"
 
 import { cn } from "@/lib/utils" // Assumed path for cn helper
-import type { CURRENCIES, TIMEZONES } from "@/lib/constants" // NEW IMPORT
+import { CURRENCIES, TIMEZONES } from "@/lib/constants"
 import type { Restaurant } from "@/api/restaurant"
 import { fetchRestaurant, updateRestaurant } from "@/api/restaurant"
 
