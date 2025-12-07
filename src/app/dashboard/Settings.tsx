@@ -3,6 +3,7 @@
 
 import * as React from "react"
 import { toast } from "sonner"
+import { Check, ChevronsUpDown } from "lucide-react"
 
 import {
   Card,
@@ -24,7 +25,22 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs"
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover"
+import {
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "@/components/ui/command"
 
+import { cn } from "@/lib/utils" // Assumed path for cn helper
+import { CURRENCIES, TIMEZONES } from "@/lib/constants" // NEW IMPORT
 import type { Restaurant } from "@/api/restaurant"
 import { fetchRestaurant, updateRestaurant } from "@/api/restaurant"
 
@@ -250,11 +266,14 @@ export default function Settings() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="currency">Currency</Label>
-                    <Input
+                    {/* Replaced Input with SearchableSelect */}
+                    <SearchableSelect
                       id="currency"
                       value={form?.currency ?? ""}
-                      onChange={(e) => updateField("currency", e.target.value)}
-                      placeholder="KES"
+                      onValueChange={(value) => updateField("currency", value)}
+                      options={CURRENCIES}
+                      placeholder="Select currency..."
+                      emptyText="No currency found."
                       disabled={isLoading}
                     />
                   </div>
@@ -262,19 +281,20 @@ export default function Settings() {
 
                 <div className="space-y-2">
                   <Label htmlFor="timezone">Timezone</Label>
-                  <Input
+                  {/* Replaced Input with SearchableSelect */}
+                  <SearchableSelect
                     id="timezone"
                     value={form?.timezone ?? ""}
-                    onChange={(e) => updateField("timezone", e.target.value)}
-                    placeholder="Africa/Nairobi"
+                    onValueChange={(value) => updateField("timezone", value)}
+                    options={TIMEZONES}
+                    placeholder="Select timezone..."
+                    emptyText="No timezone found."
                     disabled={isLoading}
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    Use a valid PHP timezone identifier, for example:
-                    <span className="ml-1 font-mono text-[11px]">
+                    Use a valid PHP timezone identifier, e.g., <span className="ml-1 font-mono text-[11px]">
                       Africa/Nairobi
-                    </span>
-                    .
+                    </span>.
                   </p>
                 </div>
               </TabsContent>
@@ -493,6 +513,84 @@ export default function Settings() {
       </form>
     </div>
   )
+}
+
+/* -------------------------- Searchable Select Component -------------------------- */
+
+type SelectOption = {
+    value: string;
+    label: string;
+};
+
+type SearchableSelectProps = {
+    id: string;
+    value: string;
+    onValueChange: (value: string) => void;
+    options: SelectOption[];
+    placeholder: string;
+    emptyText: string;
+    disabled: boolean;
+};
+
+function SearchableSelect({
+    id,
+    value,
+    onValueChange,
+    options,
+    placeholder,
+    emptyText,
+    disabled,
+}: SearchableSelectProps) {
+    const [open, setOpen] = React.useState(false);
+    
+    // Find the currently selected label to display in the button
+    const selectedLabel = options.find((option) => option.value === value)?.label;
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className="w-full justify-between font-normal"
+                    id={id}
+                    disabled={disabled}
+                >
+                    {value ? selectedLabel : placeholder}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                    <CommandInput placeholder={placeholder} />
+                    <CommandList>
+                        <CommandEmpty>{emptyText}</CommandEmpty>
+                        <CommandGroup>
+                            {options.map((option) => (
+                                <CommandItem
+                                    key={option.value}
+                                    value={option.label}
+                                    onSelect={() => {
+                                        onValueChange(option.value);
+                                        setOpen(false);
+                                    }}
+                                >
+                                    <Check
+                                        className={cn(
+                                            "mr-2 h-4 w-4",
+                                            value === option.value ? "opacity-100" : "opacity-0"
+                                        )}
+                                    />
+                                    {option.label}
+                                </CommandItem>
+                            ))}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
 }
 
 /* ---------- Small sub-component ---------- */

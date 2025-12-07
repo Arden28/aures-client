@@ -141,12 +141,6 @@ export default function Dashboard() {
           </div>
 
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
-            <Button asChild className="w-full sm:w-auto bg-primary text-primary-foreground shadow-sm">
-              <Link to={posLink}>
-                {isKitchen ? <ChefHat className="mr-2 h-4 w-4"/> : <Store className="mr-2 h-4 w-4" />}
-                {isKitchen ? "Kitchen Display" : "Open POS Interface"}
-              </Link>
-            </Button>
 
             <Tabs
               value={timeframe}

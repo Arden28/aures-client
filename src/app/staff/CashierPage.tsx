@@ -216,9 +216,21 @@ export default function CashierPage() {
       <header className="flex-none pt-4 pb-3 px-4 sm:px-6 sticky top-0 z-20 bg-background/80 backdrop-blur-xl border-b border-border/60">
           <div className="flex justify-between items-center mb-3">
                <div>
-                  <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                
+                <div className="flex items-center gap-3">
+                  {/* Responsive Logo */}
+                  <div className="h-6 shrink-0">
+                    <img 
+                      src="/images/logo.png" // Placeholder for Tapla logo
+                      alt="Tapla Logo" 
+                      className="h-full w-full object-contain" 
+                    />
+                  </div>
+                  <h1 className="text-xl font-semibold tracking-tight text-foreground hidden sm:block">
                     {activeTab === 'feed' ? 'Cashier Dashboard' : activeTab === 'tables' ? 'Floor Plan' : 'Transactions'}
                   </h1>
+                </div>
+
                   <div className="flex items-center gap-2 mt-1">
                     <span className="relative flex h-2.5 w-2.5">
                       {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>}

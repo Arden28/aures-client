@@ -17,6 +17,14 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
+import { // Added Dialog components
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 
 type Props = React.ComponentProps<"div">
 
@@ -28,6 +36,8 @@ export default function Login({ className, ...props }: Props) {
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
+  // State for the Forgot Password dialog
+  const [isForgotPwdDialogOpen, setIsForgotPwdDialogOpen] = React.useState(false) 
 
   const loading = status === "loading"
 
@@ -84,16 +94,33 @@ export default function Login({ className, ...props }: Props) {
               <Field>
                 <div className="flex items-center">
                   <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <button
-                    type="button"
-                    className="ml-auto text-xs text-primary underline-offset-4 hover:underline"
-                    // TODO: wire to /auth/forgot when ready
-                    onClick={() => {
-                      // e.g. navigate("/auth/forgot")
-                    }}
-                  >
-                    Forgot password?
-                  </button>
+                  
+                  {/* Dialog Implementation for Forgot Password */}
+                  <Dialog open={isForgotPwdDialogOpen} onOpenChange={setIsForgotPwdDialogOpen}>
+                    <DialogTrigger asChild>
+                      <button
+                        type="button"
+                        className="ml-auto text-xs text-primary underline-offset-4 hover:underline"
+                        // This onClick will now just control the dialog state
+                        onClick={() => setIsForgotPwdDialogOpen(true)}
+                      >
+                        Forgot password?
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                      <DialogHeader>
+                        <DialogTitle>Reset Password</DialogTitle>
+                        <DialogDescription>
+                          Enter your email to receive a password reset link.
+                        </DialogDescription>
+                      </DialogHeader>
+                      {/* Placeholder for the actual password reset form */}
+                      <div className="py-4 space-y-4">
+                          <Input placeholder="Enter your email" />
+                          <Button className="w-full">Send Reset Link</Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
                 <Input
                   id="password"

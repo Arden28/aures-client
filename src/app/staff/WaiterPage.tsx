@@ -54,7 +54,7 @@ import { useThemeToggle } from "@/layouts/PosLayout"
 import PosTables from "../pos/PosTables"
 
 /* -------------------------------------------------------------------------- */
-/* Types                                                                      */
+/* Types                                                                       */
 /* -------------------------------------------------------------------------- */
 
 type WaiterTask = {
@@ -69,7 +69,7 @@ type WaiterTask = {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Main Component                                                             */
+/* Main Component                                                              */
 /* -------------------------------------------------------------------------- */
 
 export default function WaiterPage() {
@@ -115,14 +115,14 @@ export default function WaiterPage() {
         // 1. CLAIM TASK
         if (order.status === 'pending' || (order.status === 'submitted' && !order.waiter)) {
              newTasks.push({
-                id: `claim-${order.id}`,
-                type: 'claim',
-                title: `New Order • Table ${order.table?.name || '??'}`,
-                subtitle: `${order.items?.length || 0} Items • Waiting for confirmation`,
-                time: getTimeDiff(order.opened_at),
-                priority: 'critical', 
-                refId: order.id,
-                order: order
+               id: `claim-${order.id}`,
+               type: 'claim',
+               title: `New Order • Table ${order.table?.name || '??'}`,
+               subtitle: `${order.items?.length || 0} Items • Waiting for confirmation`,
+               time: getTimeDiff(order.opened_at),
+               priority: 'critical', 
+               refId: order.id,
+               order: order
              })
         }
 
@@ -203,16 +203,16 @@ export default function WaiterPage() {
       
       try {
           if (task.type === 'claim') {
-              await updateOrderStatus(task.refId, { 
-                status: 'preparing',
-                waiter_id: (user as any)?.id 
-              })
-              toast.success(`Sent to Kitchen`, { description: `Table ${task.order.table?.name}` })
+             await updateOrderStatus(task.refId, { 
+               status: 'preparing',
+               waiter_id: (user as any)?.id 
+             })
+             toast.success(`Sent to Kitchen`, { description: `Table ${task.order.table?.name}` })
           }
           
           if (task.type === 'pickup') {
-              await updateOrderStatus(task.refId, { status: 'served' })
-              toast.success("Marked as Served")
+             await updateOrderStatus(task.refId, { status: 'served' })
+             toast.success("Marked as Served")
           }
           
           refreshData()
@@ -263,22 +263,22 @@ export default function WaiterPage() {
       {/* Header */}
       <header className="flex-none pt-4 pb-3 px-4 sm:px-6 sticky top-0 z-20 bg-background/80 backdrop-blur-xl border-b border-border/60">
           <div className="flex justify-between items-center mb-3">
-               <div>
-                  <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                    {activeTab === 'feed' ? 'Live Tasks' : activeTab === 'tables' ? 'Floor Plan' : 'Today\'s Orders'}
-                  </h1>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="relative flex h-2.5 w-2.5">
-                      {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>}
-                      <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", isOnline ? "bg-primary" : "bg-muted-foreground/30")}></span>
-                    </span>
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        {isOnline ? (isConnected ? "Online" : "Connecting...") : "Offline"}
-                    </span>
-                  </div>
-               </div>
-               
-               <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3">
+                {/* Responsive Logo */}
+                <div className="h-6 shrink-0">
+                  <img 
+                    src="/images/logo.png" // Placeholder for Tapla logo
+                    alt="Tapla Logo" 
+                    className="h-full w-full object-contain" 
+                  />
+                </div>
+                {/* Title is hidden on mobile to prioritize the logo/tasks, shown on small screens and up */}
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground hidden sm:block">
+                  {activeTab === 'feed' ? 'Live Tasks' : activeTab === 'tables' ? 'Floor Plan' : 'Today\'s Orders'}
+                </h1>
+              </div>
+              
+              <div className="flex items-center gap-3">
                   <div className={cn(
                       "flex items-center gap-2 p-1 pl-3 pr-1 rounded-full border transition-all duration-300",
                       isOnline ? "bg-primary/10 border-primary/20" : "bg-muted/50 border-border"
@@ -318,16 +318,27 @@ export default function WaiterPage() {
                           </DropdownMenuItem>
                       </DropdownMenuContent>
                   </DropdownMenu>
-               </div>
+              </div>
           </div>
-
+          
           {activeTab === 'feed' && isOnline && (
-             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar animate-in slide-in-from-top-1 fade-in duration-300">
-                 <StatChip label="Pending" value={tasks.length} active />
-                 <StatChip label="Completed" value={dailyStats.completed} />
-                 <StatChip label="Total Sales" value={formatMoney(dailyStats.sales)} />
-             </div>
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar animate-in slide-in-from-top-1 fade-in duration-300">
+                  <StatChip label="Pending" value={tasks.length} active />
+                  <StatChip label="Completed" value={dailyStats.completed} />
+                  <StatChip label="Total Sales" value={formatMoney(dailyStats.sales)} />
+              </div>
           )}
+
+          {/* Connection Status moved below the title/logo section */}
+          <div className="flex items-center gap-2 mt-1 -mt-2"> {/* Adjusted margin to tighten spacing */}
+            <span className="relative flex h-2.5 w-2.5">
+              {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>}
+              <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", isOnline ? "bg-primary" : "bg-muted-foreground/30")}></span>
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {isOnline ? (isConnected ? "Online" : "Connecting...") : "Offline"}
+            </span>
+          </div>
       </header>
 
       {/* Main Content */}
@@ -343,10 +354,10 @@ export default function WaiterPage() {
               </TabsContent>
 
               <TabsContent value="tables" className="h-full mt-0 data-[state=inactive]:hidden">
-                    <div className="h-full pb-20"><PosTables /></div>
+                      <div className="h-full pb-20"><PosTables /></div>
               </TabsContent>
               <TabsContent value="orders" className="h-full mt-0 data-[state=inactive]:hidden">
-                    <WaiterOrdersSection user={user} />
+                      <WaiterOrdersSection user={user} />
               </TabsContent>
           </Tabs>
       </main>
@@ -354,11 +365,11 @@ export default function WaiterPage() {
       {/* Bottom Dock */}
       {isOnline && (
           <div className="absolute bottom-6 left-0 right-0 flex justify-center z-50 pointer-events-none animate-in slide-in-from-bottom-6 fade-in duration-500">
-             <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
-                 <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Bell} label="" badge={tasks.length} />
-                 <div className="w-px h-5 bg-border mx-1" />
-                 <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={ForkKnife} label="Orders" />
-             </nav>
+              <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
+                  <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Bell} label="" badge={tasks.length} />
+                  <div className="w-px h-5 bg-border mx-1" />
+                  <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={ForkKnife} label="Orders" />
+              </nav>
           </div>
       )}
     </div>
@@ -366,7 +377,7 @@ export default function WaiterPage() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* WAITER ORDERS SECTION (Filtered by Today & Waiter)                         */
+/* WAITER ORDERS SECTION (Filtered by Today & Waiter)                          */
 /* -------------------------------------------------------------------------- */
 
 function WaiterOrdersSection({ user }: { user: any }) {
@@ -431,85 +442,85 @@ function WaiterOrdersSection({ user }: { user: any }) {
         <div className="flex h-full w-full bg-background text-foreground overflow-hidden font-sans">
              {/* LEFT: List */}
              <div className={cn(
-                "flex flex-col h-full border-r border-border bg-card transition-all duration-300 z-10 w-full md:w-[400px]",
-                !isMobileList ? "hidden md:flex" : "flex"
+                 "flex flex-col h-full border-r border-border bg-card transition-all duration-300 z-10 w-full md:w-[400px]",
+                 !isMobileList ? "hidden md:flex" : "flex"
              )}>
-                <div className="flex-none p-4 border-b border-border space-y-4 bg-card">
-                    <div className="flex items-center justify-between">
-                        <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
-                            <TabsList className="grid w-full grid-cols-2 bg-muted/50">
-                                <TabsTrigger value="active">Active</TabsTrigger>
-                                <TabsTrigger value="history">History</TabsTrigger>
-                            </TabsList>
-                        </Tabs>
-                    </div>
-                    <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted-foreground bg-muted/20 rounded-md">
-                        <CalendarDays className="h-3 w-3" />
-                        <span>Showing orders for Today</span>
-                    </div>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input 
-                            placeholder="Search table, ID..." 
-                            className="pl-9 bg-muted/30 border-input"
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
-                        />
-                    </div>
-                </div>
+                 <div className="flex-none p-4 border-b border-border space-y-4 bg-card">
+                     <div className="flex items-center justify-between">
+                         <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
+                             <TabsList className="grid w-full grid-cols-2 bg-muted/50">
+                                 <TabsTrigger value="active">Active</TabsTrigger>
+                                 <TabsTrigger value="history">History</TabsTrigger>
+                             </TabsList>
+                         </Tabs>
+                     </div>
+                     <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted-foreground bg-muted/20 rounded-md">
+                         <CalendarDays className="h-3 w-3" />
+                         <span>Showing orders for Today</span>
+                     </div>
+                     <div className="relative">
+                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                         <Input 
+                             placeholder="Search table, ID..." 
+                             className="pl-9 bg-muted/30 border-input"
+                             value={search}
+                             onChange={e => setSearch(e.target.value)}
+                         />
+                     </div>
+                 </div>
 
-                <div className="flex-1 overflow-hidden bg-card">
-                    <ScrollArea className="h-full">
-                        <div className="flex flex-col p-2 gap-2 pb-20">
-                            {filteredOrders.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-2 opacity-50">
-                                    <Clock className="h-12 w-12 stroke-[1.5]" />
-                                    <p className="text-sm">No orders found for today</p>
-                                </div>
-                            ) : (
-                                filteredOrders.map(order => (
-                                    <OrderListItem 
-                                        key={order.id} 
-                                        order={order} 
-                                        active={selectedId === order.id} 
-                                        onClick={() => handleSelect(order.id)} 
-                                    />
-                                ))
-                            )}
-                        </div>
-                    </ScrollArea>
-                </div>
+                 <div className="flex-1 overflow-hidden bg-card">
+                     <ScrollArea className="h-full">
+                         <div className="flex flex-col p-2 gap-2 pb-20">
+                             {filteredOrders.length === 0 ? (
+                                 <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-2 opacity-50">
+                                     <Clock className="h-12 w-12 stroke-[1.5]" />
+                                     <p className="text-sm">No orders found for today</p>
+                                 </div>
+                             ) : (
+                                 filteredOrders.map(order => (
+                                     <OrderListItem 
+                                         key={order.id} 
+                                         order={order} 
+                                         active={selectedId === order.id} 
+                                         onClick={() => handleSelect(order.id)} 
+                                     />
+                                 ))
+                             )}
+                         </div>
+                     </ScrollArea>
+                 </div>
              </div>
 
              {/* RIGHT: Detail View */}
              <div className={cn(
-                "flex-1 flex flex-col h-full bg-card md:border-l border-border relative",
-                isMobileList ? "hidden md:flex" : "flex"
+                 "flex-1 flex flex-col h-full bg-card md:border-l border-border relative",
+                 isMobileList ? "hidden md:flex" : "flex"
              )}>
-                {selectedOrder ? (
-                    <OrderDetailView 
-                        order={selectedOrder} 
-                        onBack={() => setIsMobileList(true)}
-                        actionNode={null} 
-                    />
-                ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-muted/5">
-                        <div className="h-24 w-24 rounded-full bg-muted/50 border border-border flex items-center justify-center mb-6 shadow-sm">
-                            <ArrowRight className="h-10 w-10 opacity-30 text-foreground" />
-                        </div>
-                        <h3 className="text-xl font-semibold text-foreground mb-2">No Order Selected</h3>
-                        <p className="max-w-sm text-muted-foreground text-sm">
-                            Select an order from today's list to view details.
-                        </p>
-                    </div>
-                )}
+                 {selectedOrder ? (
+                     <OrderDetailView 
+                         order={selectedOrder} 
+                         onBack={() => setIsMobileList(true)}
+                         actionNode={null} 
+                     />
+                 ) : (
+                     <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-muted/5">
+                         <div className="h-24 w-24 rounded-full bg-muted/50 border border-border flex items-center justify-center mb-6 shadow-sm">
+                             <ArrowRight className="h-10 w-10 opacity-30 text-foreground" />
+                         </div>
+                         <h3 className="text-xl font-semibold text-foreground mb-2">No Order Selected</h3>
+                         <p className="max-w-sm text-muted-foreground text-sm">
+                             Select an order from today's list to view details.
+                         </p>
+                     </div>
+                 )}
              </div>
         </div>
     )
 }
 
 /* -------------------------------------------------------------------------- */
-/* Shared Views & Helpers                                                     */
+/* Shared Views & Helpers                                                      */
 /* -------------------------------------------------------------------------- */
 
 function isToday(dateStr: string | null) {
@@ -632,7 +643,7 @@ function OrderListItem({ order, active, onClick }: { order: Order, active: boole
             {formatTime(order.opened_at || "")}
           </span>
         </div>
-  
+    
         <div className="flex justify-between items-end w-full">
           <div className="flex flex-col gap-1">
             <StatusBadge status={order.status} mini />
@@ -657,9 +668,9 @@ function StatusBadge({ status, mini }: { status: string, mini?: boolean }) {
       completed: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",
       cancelled: "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border-red-200 dark:border-red-800",
     }[status.toLowerCase()] || "bg-muted text-muted-foreground border-border"
-  
+    
     const label = status.replace("_", " ")
-  
+    
     if (mini) {
       return (
         <span className={cn("text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-md border inline-flex w-fit", styles)}>
@@ -667,7 +678,7 @@ function StatusBadge({ status, mini }: { status: string, mini?: boolean }) {
         </span>
       )
     }
-  
+    
     return (
       <Badge variant="outline" className={cn("capitalize border shadow-none", styles)}>
         {label}

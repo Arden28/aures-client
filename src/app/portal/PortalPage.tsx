@@ -8,7 +8,7 @@ import {
   CreditCard, RotateCcw
 } from "lucide-react"
 
-import { cn } from "@/lib/utils"
+import { cn, formatMoney } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -956,10 +956,3 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
     )
   }
   
-  function formatMoney(amount: number, currency: string) {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 0
-    }).format(amount)
-  }

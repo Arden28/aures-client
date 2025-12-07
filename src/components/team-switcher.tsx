@@ -1,90 +1,66 @@
 "use client"
 
 import * as React from "react"
-import { ChevronsUpDown, Plus } from "lucide-react"
+import { ChevronsUpDown } from "lucide-react" // Keep the icon
 
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuShortcut,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
+  // Removed unused Dropdown imports
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
 
-export function TeamSwitcher({
-  teams,
-}: {
-  teams: {
-    name: string
-    logo: React.ElementType
-    plan: string
-  }[]
-}) {
-  const { isMobile } = useSidebar()
-  const [activeTeam, setActiveTeam] = React.useState(teams[0])
+// NOTE: The 'teams' prop is no longer needed since team switching is removed,
+// but we'll use a functional component structure.
 
-  if (!activeTeam) {
-    return null
-  }
+/**
+ * Renders the responsive logo area in the sidebar header.
+ * Displays the full logo when expanded, and the icon logo when collapsed.
+ * Retains the ChevronsUpDown icon for visual consistency/indicator.
+ */
+export function TeamSwitcher() {
+  const { isCollapsed } = useSidebar() 
+  
+  // NOTE: Assuming '/images/logo-icon.png' is your small iconed logo 
+  // and '/images/logo.png' is the full wordmark logo.
+  const fullLogoPath = "/images/logo.png"
+  const iconLogoPath = "/images/logo-icon.png" // Placeholder for your secondary/icon logo
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton
-              size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-            >
-              <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                <activeTeam.logo className="size-4" />
+        {/* We keep the SidebarMenuButton to maintain layout and styling */}
+        <SidebarMenuButton
+          size="md"
+          // We remove data-[state=open] styles as there is no 'open' state anymore
+          className="hover:bg-sidebar-accent/10 cursor-default" 
+        >
+          
+          {isCollapsed ? (
+            // 1. Collapsed State: Show icon-only logo
+            <div className="bg-sidebar-primary/10 flex aspect-square size-8 items-center justify-center rounded-lg">
+              <img 
+                src={iconLogoPath} // Use the icon logo here
+                alt="Tapla Icon" 
+                className="size-5 object-contain" 
+              />
+            </div>
+          ) : (
+            // 2. Expanded State: Show full logo and chevron icon
+            <>
+              <div className="grid flex-1 text-left leading-tight">
+                <img 
+                  src={fullLogoPath} // Use the full wordmark logo here
+                  alt="Tapla Logo" 
+                  className="h-6 w-auto object-contain" 
+                />
               </div>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{activeTeam.name}</span>
-                <span className="truncate text-xs">{activeTeam.plan}</span>
-              </div>
-              <ChevronsUpDown className="ml-auto" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
-            align="start"
-            side={isMobile ? "bottom" : "right"}
-            sideOffset={4}
-          >
-            <DropdownMenuLabel className="text-muted-foreground text-xs">
-              Teams
-            </DropdownMenuLabel>
-            {teams.map((team, index) => (
-              <DropdownMenuItem
-                key={team.name}
-                onClick={() => setActiveTeam(team)}
-                className="gap-2 p-2"
-              >
-                <div className="flex size-6 items-center justify-center rounded-md border">
-                  <team.logo className="size-3.5 shrink-0" />
-                </div>
-                {team.name}
-                <DropdownMenuShortcut>⌘{index + 1}</DropdownMenuShortcut>
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="gap-2 p-2">
-              <div className="flex size-6 items-center justify-center rounded-md border bg-transparent">
-                <Plus className="size-4" />
-              </div>
-              <div className="text-muted-foreground font-medium">Add team</div>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <ChevronsUpDown className="ml-auto opacity-70" />
+            </>
+          )}
+          
+        </SidebarMenuButton>
       </SidebarMenuItem>
     </SidebarMenu>
   )
