@@ -340,7 +340,7 @@ export default function KDS() {
             <DropdownMenuTrigger asChild>
                 <Avatar className="h-8 w-8 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:ring-2 hover:ring-zinc-400/20 transition-all">
                     <AvatarImage src="https://github.com/shadcn.png" />
-                    <AvatarFallback>{userName.charAt(0)}</AvatarFallback>
+                    <AvatarFallback>{userName?.charAt(0)}</AvatarFallback>
                 </Avatar>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 p-2">
