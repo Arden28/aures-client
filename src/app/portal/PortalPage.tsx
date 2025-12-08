@@ -921,7 +921,7 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
           {/* Footer Actions */}
           <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
              <Button 
-               className="w-full h-14 text-lg font-bold rounded-xl shadow-lg shadow-primary/10" 
+               className="w-full h-14 text-lg font-bold rounded-xl shadow-lg text-white shadow-primary/10" 
                variant={order.status === 'served' ? "default" : "secondary"}
                onClick={onClose}
              >
