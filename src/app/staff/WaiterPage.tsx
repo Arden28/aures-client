@@ -59,7 +59,7 @@ import PosTables from "@/app/pos/PosTables"
 /* -------------------------------------------------------------------------- */
 
 const playSound = (type: 'new' | 'ready') => {
-    const file = type === 'new' ? '/sounds/notification.mp3' : '/sounds/bell.mp3'
+    const file = type === 'new' ? '/sounds/notification.mp3' : '/sounds/notification.mp3'
     // Fallback to KDS sound if specific files don't exist in your public folder
     const audio = new Audio(file)
     audio.volume = 0.7
@@ -70,7 +70,7 @@ const sendNotification = (title: string, body: string) => {
     if (!("Notification" in window)) return
     
     if (Notification.permission === "granted") {
-        new Notification(title, { body, icon: "/pwa-192x192.png" }) // Adjust icon path
+        new Notification(title, { body, icon: "/images/icon.png" }) // Adjust icon path
     }
 }
 
@@ -319,22 +319,22 @@ export default function WaiterPage() {
       {/* Header */}
       <header className="flex-none pt-4 pb-3 px-4 sm:px-6 sticky top-0 z-20 bg-background/80 backdrop-blur-xl border-b border-border/60">
           <div className="flex justify-between items-center mb-3">
-               <div>
-                  <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                    {activeTab === 'feed' ? 'Live Tasks' : activeTab === 'tables' ? 'Floor Plan' : 'Today\'s Orders'}
-                  </h1>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="relative flex h-2.5 w-2.5">
-                      {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>}
-                      <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", isOnline ? "bg-primary" : "bg-muted-foreground/30")}></span>
-                    </span>
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        {isOnline ? (isConnected ? "Online" : "Connecting...") : "Offline"}
-                    </span>
-                  </div>
-               </div>
-               
-               <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3">
+                {/* Responsive Logo */}
+                <div className="h-6 shrink-0">
+                  <img 
+                    src="/images/logo.png" // Placeholder for Tapla logo
+                    alt="Tapla Logo" 
+                    className="h-full w-full object-contain" 
+                  />
+                </div>
+                {/* Title is hidden on mobile to prioritize the logo/tasks, shown on small screens and up */}
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground hidden sm:block">
+                  {activeTab === 'feed' ? 'Live Tasks' : activeTab === 'tables' ? 'Floor Plan' : 'Today\'s Orders'}
+                </h1>
+              </div>
+              
+              <div className="flex items-center gap-3">
                   <div className={cn(
                       "flex items-center gap-2 p-1 pl-3 pr-1 rounded-full border transition-all duration-300",
                       isOnline ? "bg-primary/10 border-primary/20" : "bg-muted/50 border-border"
@@ -344,7 +344,7 @@ export default function WaiterPage() {
                       </span>
                       <Switch 
                         checked={isOnline} 
-                        onCheckedChange={handleShiftToggle} 
+                        onCheckedChange={setIsOnline} 
                         className="data-[state=checked]:bg-primary scale-90" 
                       />
                   </div>
@@ -374,16 +374,27 @@ export default function WaiterPage() {
                           </DropdownMenuItem>
                       </DropdownMenuContent>
                   </DropdownMenu>
-               </div>
+              </div>
           </div>
-
+          
           {activeTab === 'feed' && isOnline && (
-             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar animate-in slide-in-from-top-1 fade-in duration-300">
-                 <StatChip label="Pending" value={tasks.length} active />
-                 <StatChip label="Completed" value={dailyStats.completed} />
-                 <StatChip label="Total Sales" value={formatMoney(dailyStats.sales)} />
-             </div>
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar animate-in slide-in-from-top-1 fade-in duration-300">
+                  <StatChip label="Pending" value={tasks.length} active />
+                  <StatChip label="Completed" value={dailyStats.completed} />
+                  <StatChip label="Total Sales" value={formatMoney(dailyStats.sales)} />
+              </div>
           )}
+
+          {/* Connection Status moved below the title/logo section */}
+          <div className="flex items-center gap-2 mt-1 -mt-2"> {/* Adjusted margin to tighten spacing */}
+            <span className="relative flex h-2.5 w-2.5">
+              {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>}
+              <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", isOnline ? "bg-primary" : "bg-muted-foreground/30")}></span>
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {isOnline ? (isConnected ? "Online" : "Connecting...") : "Offline"}
+            </span>
+          </div>
       </header>
 
       {/* Main Content */}
