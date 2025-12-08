@@ -9,12 +9,15 @@ export type StaffRole =
   | "cashier"
   | "client"
 
+export type StaffStatus = "active" | "inactive"
+
 export type Staff = {
   id: number
   restaurant_id: number
   name: string
   email?: string | null
   role: StaffRole
+  status?: StaffStatus  
   created_at?: string
   updated_at?: string
 }
@@ -79,4 +82,17 @@ export async function updateStaff(id: number, body: StaffPayload) {
 export async function deleteStaff(id: number) {
   const res = await apiService.delete<ApiResult<unknown>>(`/v1/staff/${id}`)
   return res
+}
+
+
+/**
+ * Update staff status (active / inactive).
+ * Matches backend controller `updateStatus`.
+ */
+export async function updateStaffStatus(id: number, status: StaffStatus) {
+  const res = await apiService.patch<Staff, { status: StaffStatus }>(
+    `/v1/staff/${id}/status`,
+    { status }
+  )
+  return res.data
 }

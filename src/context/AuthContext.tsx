@@ -9,6 +9,7 @@ export type AppUser = {
   email: string
   phone?: string
   role?: string
+  status?: string
   tenant_id?: number | null
   tenant_name?: string | null
   roles?: string[]

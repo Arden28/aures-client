@@ -46,20 +46,20 @@ import {
 // Integration
 import { fetchOrders, updateOrderStatus, type Order } from "@/api/order"
 import { subscribeToKitchen, type KDSOrder } from "@/api/kds"
-import { updateUserStatus } from "@/api/users"
+import { updateStaffStatus } from "@/api/staff"
 import { toast } from "sonner"
 import useAuth from "@/hooks/useAuth"
 import { useThemeToggle } from "@/layouts/PosLayout"
 
 // Page Components
-import PosTables from "../pos/PosTables"
+import PosTables from "@/app/pos/PosTables"
 
 /* -------------------------------------------------------------------------- */
 /* Helpers: Audio & Notifications                                             */
 /* -------------------------------------------------------------------------- */
 
 const playSound = (type: 'new' | 'ready') => {
-    const file = type === 'new' ? '/sounds/new-order.mp3' : '/sounds/bell.mp3'
+    const file = type === 'new' ? '/sounds/notification.mp3' : '/sounds/bell.mp3'
     // Fallback to KDS sound if specific files don't exist in your public folder
     const audio = new Audio(file)
     audio.volume = 0.7
@@ -101,7 +101,7 @@ type WaiterTask = {
 
 export default function WaiterPage() {
   const navigate = useNavigate()
-  const { user, logout, refreshUser } = useAuth()
+  const { user, logout, refresh } = useAuth()
   const { theme, toggleTheme } = useThemeToggle()
   
   // Initialize based on user status
@@ -132,11 +132,11 @@ export default function WaiterPage() {
     
     try {
         const newStatus = checked ? 'active' : 'inactive'
-        await updateUserStatus((user as any)?.id, newStatus)
+        await updateStaffStatus((user as any)?.id, newStatus)
         toast.success(checked ? "Shift Started" : "Shift Ended", {
             description: checked ? "You are now receiving orders." : "You are now offline."
         })
-        if (refreshUser) refreshUser()
+        if (refresh) refresh()
     } catch (error) {
         setIsOnline(!checked)
         toast.error("Failed to update status")
@@ -814,9 +814,9 @@ function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t:
             <div className="px-4 pb-4 pt-0 pl-5">
                 <Button 
                     onClick={() => onAction(task)} 
-                    className={cn("w-full font-semibold shadow-sm h-11 rounded-lg text-sm", 
+                    className={cn("w-full font-semibold text-white shadow-sm h-11 rounded-lg text-sm", 
                         isCritical ? "bg-primary text-primary-foreground hover:bg-primary/90" : 
-                        "bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"
+                        "bg-secondary text-white hover:bg-secondary/80 border border-border"
                     )}
                 >
                     {task.type === 'claim' && "Send to Kitchen"}
@@ -866,4 +866,11 @@ function getTimeDiff(dateStr: string | null) {
 
 function formatMoney(amount: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
+}
+
+function formatTime(dateString: string) {
+  if (!dateString) return "--"
+  return new Date(dateString).toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit'
+  })
 }
