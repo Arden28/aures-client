@@ -45,7 +45,8 @@ import {
 
 // Integration
 import { fetchOrders, updateOrderStatus, type Order } from "@/api/order"
-import { subscribeToKitchen } from "@/api/kds"
+import { subscribeToKitchen, type KDSOrder } from "@/api/kds"
+import { updateUserStatus } from "@/api/users"
 import { toast } from "sonner"
 import useAuth from "@/hooks/useAuth"
 import { useThemeToggle } from "@/layouts/PosLayout"
@@ -54,7 +55,33 @@ import { useThemeToggle } from "@/layouts/PosLayout"
 import PosTables from "../pos/PosTables"
 
 /* -------------------------------------------------------------------------- */
-/* Types                                                                       */
+/* Helpers: Audio & Notifications                                             */
+/* -------------------------------------------------------------------------- */
+
+const playSound = (type: 'new' | 'ready') => {
+    const file = type === 'new' ? '/sounds/new-order.mp3' : '/sounds/bell.mp3'
+    // Fallback to KDS sound if specific files don't exist in your public folder
+    const audio = new Audio(file)
+    audio.volume = 0.7
+    audio.play().catch(e => console.log("Audio play failed (interaction needed):", e))
+}
+
+const sendNotification = (title: string, body: string) => {
+    if (!("Notification" in window)) return
+    
+    if (Notification.permission === "granted") {
+        new Notification(title, { body, icon: "/pwa-192x192.png" }) // Adjust icon path
+    }
+}
+
+const requestNotificationAccess = () => {
+    if ("Notification" in window && Notification.permission !== "granted") {
+        Notification.requestPermission()
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Types                                                                      */
 /* -------------------------------------------------------------------------- */
 
 type WaiterTask = {
@@ -69,15 +96,16 @@ type WaiterTask = {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Main Component                                                              */
+/* Main Component                                                             */
 /* -------------------------------------------------------------------------- */
 
 export default function WaiterPage() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, logout, refreshUser } = useAuth()
   const { theme, toggleTheme } = useThemeToggle()
   
-  const [isOnline, setIsOnline] = React.useState(false)
+  // Initialize based on user status
+  const [isOnline, setIsOnline] = React.useState((user as any)?.status === 'active')
   const [activeTab, setActiveTab] = React.useState("feed")
   const [tasks, setTasks] = React.useState<WaiterTask[]>([])
   const [isConnected, setIsConnected] = React.useState(false)
@@ -85,62 +113,80 @@ export default function WaiterPage() {
   // Dynamic Stats State
   const [dailyStats, setDailyStats] = React.useState({ completed: 0, sales: 0 })
 
-  // Payment View State (Task Overlay)
+  // Payment View State
   const [selectedPaymentTask, setSelectedPaymentTask] = React.useState<WaiterTask | null>(null)
 
   // Safe User Data
   const userName = (user as any)?.name || "Staff"
   const userRole = (user as any)?.role || "Waiter"
   
-  // -- Data Fetching & Logic --
+  // -- Sync isOnline --
+  React.useEffect(() => {
+    if (user) setIsOnline((user as any).status === 'active')
+  }, [user])
+
+  // -- Handlers --
+  const handleShiftToggle = async (checked: boolean) => {
+    setIsOnline(checked)
+    if (checked) requestNotificationAccess()
+    
+    try {
+        const newStatus = checked ? 'active' : 'inactive'
+        await updateUserStatus((user as any)?.id, newStatus)
+        toast.success(checked ? "Shift Started" : "Shift Ended", {
+            description: checked ? "You are now receiving orders." : "You are now offline."
+        })
+        if (refreshUser) refreshUser()
+    } catch (error) {
+        setIsOnline(!checked)
+        toast.error("Failed to update status")
+    }
+  }
+
+  // -- Data Fetching --
   const refreshData = React.useCallback(async () => {
     if (!isOnline) return
     try {
-      // Fetch broader list to calculate daily stats correctly
       const [orderData] = await Promise.all([fetchOrders({ per_page: 100 })])
       const allOrders = Array.isArray(orderData) ? orderData : orderData.items
-      
-      // Filter for Today Only
       const todayOrders = allOrders.filter(o => isToday(o.opened_at))
 
-      // 1. Calculate Stats
+      // Stats
       const completedOrders = todayOrders.filter(o => o.status === 'completed')
       const totalSales = completedOrders.reduce((acc, o) => acc + o.total, 0)
       setDailyStats({ completed: completedOrders.length, sales: totalSales })
 
-      // 2. Build Tasks
+      // Build Tasks
       const newTasks: WaiterTask[] = []
       
       todayOrders.forEach(order => {
-        // 1. CLAIM TASK
+        // 1. CLAIM
         if (order.status === 'pending' || (order.status === 'submitted' && !order.waiter)) {
              newTasks.push({
-               id: `claim-${order.id}`,
-               type: 'claim',
-               title: `New Order • Table ${order.table?.name || '??'}`,
-               subtitle: `${order.items?.length || 0} Items • Waiting for confirmation`,
-               time: getTimeDiff(order.opened_at),
-               priority: 'critical', 
-               refId: order.id,
-               order: order
+                id: `claim-${order.id}`,
+                type: 'claim',
+                title: `New Order • Table ${order.table?.name || '??'}`,
+                subtitle: `${order.items?.length || 0} Items • Waiting for confirmation`,
+                time: getTimeDiff(order.opened_at),
+                priority: 'critical', 
+                refId: order.id,
+                order: order
              })
         }
-
-        // 2. PICKUP TASK
+        // 2. PICKUP
         if (order.status === 'ready') {
             newTasks.push({
                 id: `ready-${order.id}`,
                 type: 'pickup',
                 title: `Order Ready • Table ${order.table?.name || '??'}`,
                 subtitle: `Ticket #${order.id} • Pickup at Pass`,
-                time: getTimeDiff(order.opened_at), // Using opened_at for consistency or updated_at if available
+                time: getTimeDiff(order.updated_at),
                 priority: 'high',
                 refId: order.id,
                 order: order
             })
         }
-
-        // 3. PAYMENT TASK
+        // 3. PAYMENT
         if (order.status === 'served' && order.payment_status === 'unpaid') {
             newTasks.push({
                 id: `pay-${order.id}`,
@@ -168,18 +214,28 @@ export default function WaiterPage() {
     let unsubscribe = () => {}
 
     if (isOnline) {
-      toast.success("Shift Started", { description: "Connected to Kitchen Display System." })
       refreshData()
 
       unsubscribe = subscribeToKitchen(1, {
-        onNewOrder: (order) => {
-            console.log("SOCKET: New Order", order)
+        onNewOrder: (kdsOrder) => {
+            console.log("SOCKET: New Order", kdsOrder)
+            // Play Sound & Notify
+            playSound('new')
+            sendNotification("New Order", `Table ${kdsOrder.table?.name} placed an order.`)
             toast("New Order Received", { icon: <Bell className="h-4 w-4 text-primary" /> })
+            
+            // Refresh logic (simple approach)
             refreshData()
         },
         onOrderStatusUpdated: (id, status, tableId) => {
-            console.log("SOCKET: Status Update", id, status, tableId)
-            if (status === 'ready') toast("Order Ready for Pickup!", { icon: <ChefHat className="h-4 w-4 text-orange-500" /> })
+            console.log("SOCKET: Status Update", id, status)
+            
+            if (status === 'ready') {
+                playSound('ready')
+                sendNotification("Order Ready", `Order #${id} is ready for pickup!`)
+                toast("Order Ready for Pickup!", { icon: <ChefHat className="h-4 w-4 text-orange-500" /> })
+            }
+            
             refreshData()
         },
         onItemStatusUpdated: () => refreshData()
@@ -192,7 +248,7 @@ export default function WaiterPage() {
     return () => { unsubscribe(); setIsConnected(false) }
   }, [isOnline, refreshData])
 
-  // -- Handlers --
+  // -- Task Actions --
   const handleTaskAction = async (task: WaiterTask) => {
       if (task.type === 'payment') {
         setSelectedPaymentTask(task)
@@ -203,16 +259,16 @@ export default function WaiterPage() {
       
       try {
           if (task.type === 'claim') {
-             await updateOrderStatus(task.refId, { 
-               status: 'preparing',
-               waiter_id: (user as any)?.id 
-             })
-             toast.success(`Sent to Kitchen`, { description: `Table ${task.order.table?.name}` })
+              await updateOrderStatus(task.refId, { 
+                status: 'preparing',
+                waiter_id: (user as any)?.id 
+              })
+              toast.success(`Sent to Kitchen`, { description: `Table ${task.order.table?.name}` })
           }
           
           if (task.type === 'pickup') {
-             await updateOrderStatus(task.refId, { status: 'served' })
-             toast.success("Marked as Served")
+              await updateOrderStatus(task.refId, { status: 'served' })
+              toast.success("Marked as Served")
           }
           
           refreshData()
@@ -263,22 +319,22 @@ export default function WaiterPage() {
       {/* Header */}
       <header className="flex-none pt-4 pb-3 px-4 sm:px-6 sticky top-0 z-20 bg-background/80 backdrop-blur-xl border-b border-border/60">
           <div className="flex justify-between items-center mb-3">
-              <div className="flex items-center gap-3">
-                {/* Responsive Logo */}
-                <div className="h-6 shrink-0">
-                  <img 
-                    src="/images/logo.png" // Placeholder for Tapla logo
-                    alt="Tapla Logo" 
-                    className="h-full w-full object-contain" 
-                  />
-                </div>
-                {/* Title is hidden on mobile to prioritize the logo/tasks, shown on small screens and up */}
-                <h1 className="text-2xl font-semibold tracking-tight text-foreground hidden sm:block">
-                  {activeTab === 'feed' ? 'Live Tasks' : activeTab === 'tables' ? 'Floor Plan' : 'Today\'s Orders'}
-                </h1>
-              </div>
-              
-              <div className="flex items-center gap-3">
+               <div>
+                  <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                    {activeTab === 'feed' ? 'Live Tasks' : activeTab === 'tables' ? 'Floor Plan' : 'Today\'s Orders'}
+                  </h1>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="relative flex h-2.5 w-2.5">
+                      {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>}
+                      <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", isOnline ? "bg-primary" : "bg-muted-foreground/30")}></span>
+                    </span>
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        {isOnline ? (isConnected ? "Online" : "Connecting...") : "Offline"}
+                    </span>
+                  </div>
+               </div>
+               
+               <div className="flex items-center gap-3">
                   <div className={cn(
                       "flex items-center gap-2 p-1 pl-3 pr-1 rounded-full border transition-all duration-300",
                       isOnline ? "bg-primary/10 border-primary/20" : "bg-muted/50 border-border"
@@ -288,7 +344,7 @@ export default function WaiterPage() {
                       </span>
                       <Switch 
                         checked={isOnline} 
-                        onCheckedChange={setIsOnline} 
+                        onCheckedChange={handleShiftToggle} 
                         className="data-[state=checked]:bg-primary scale-90" 
                       />
                   </div>
@@ -318,27 +374,16 @@ export default function WaiterPage() {
                           </DropdownMenuItem>
                       </DropdownMenuContent>
                   </DropdownMenu>
-              </div>
+               </div>
           </div>
-          
-          {activeTab === 'feed' && isOnline && (
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar animate-in slide-in-from-top-1 fade-in duration-300">
-                  <StatChip label="Pending" value={tasks.length} active />
-                  <StatChip label="Completed" value={dailyStats.completed} />
-                  <StatChip label="Total Sales" value={formatMoney(dailyStats.sales)} />
-              </div>
-          )}
 
-          {/* Connection Status moved below the title/logo section */}
-          <div className="flex items-center gap-2 mt-1 -mt-2"> {/* Adjusted margin to tighten spacing */}
-            <span className="relative flex h-2.5 w-2.5">
-              {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>}
-              <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", isOnline ? "bg-primary" : "bg-muted-foreground/30")}></span>
-            </span>
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                {isOnline ? (isConnected ? "Online" : "Connecting...") : "Offline"}
-            </span>
-          </div>
+          {activeTab === 'feed' && isOnline && (
+             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar animate-in slide-in-from-top-1 fade-in duration-300">
+                 <StatChip label="Pending" value={tasks.length} active />
+                 <StatChip label="Completed" value={dailyStats.completed} />
+                 <StatChip label="Total Sales" value={formatMoney(dailyStats.sales)} />
+             </div>
+          )}
       </header>
 
       {/* Main Content */}
@@ -347,17 +392,17 @@ export default function WaiterPage() {
               
               <TabsContent value="feed" className="h-full mt-0 data-[state=inactive]:hidden">
                   {!isOnline ? (
-                      <OfflineToggleScreen onStart={() => setIsOnline(true)} />
+                      <OfflineToggleScreen onStart={() => handleShiftToggle(true)} />
                   ) : (
                       <TaskFeed tasks={tasks} onAction={handleTaskAction} />
                   )}
               </TabsContent>
 
               <TabsContent value="tables" className="h-full mt-0 data-[state=inactive]:hidden">
-                      <div className="h-full pb-20"><PosTables /></div>
+                    <div className="h-full pb-20"><PosTables /></div>
               </TabsContent>
               <TabsContent value="orders" className="h-full mt-0 data-[state=inactive]:hidden">
-                      <WaiterOrdersSection user={user} />
+                    <WaiterOrdersSection user={user} />
               </TabsContent>
           </Tabs>
       </main>
@@ -365,11 +410,11 @@ export default function WaiterPage() {
       {/* Bottom Dock */}
       {isOnline && (
           <div className="absolute bottom-6 left-0 right-0 flex justify-center z-50 pointer-events-none animate-in slide-in-from-bottom-6 fade-in duration-500">
-              <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
-                  <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Bell} label="" badge={tasks.length} />
-                  <div className="w-px h-5 bg-border mx-1" />
-                  <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={ForkKnife} label="Orders" />
-              </nav>
+             <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
+                 <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Bell} label="" badge={tasks.length} />
+                 <div className="w-px h-5 bg-border mx-1" />
+                 <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={ForkKnife} label="Orders" />
+             </nav>
           </div>
       )}
     </div>
@@ -377,7 +422,7 @@ export default function WaiterPage() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* WAITER ORDERS SECTION (Filtered by Today & Waiter)                          */
+/* WAITER ORDERS SECTION (Filtered by Today & Waiter)                         */
 /* -------------------------------------------------------------------------- */
 
 function WaiterOrdersSection({ user }: { user: any }) {
@@ -392,19 +437,10 @@ function WaiterOrdersSection({ user }: { user: any }) {
         try {
             const res = await fetchOrders({ per_page: 100 })
             const allOrders = res.items || []
-            
-            // 1. Filter by Current Waiter
-            const waiterOrders = user?.id 
-                ? allOrders.filter(o => o.waiter?.id === user.id) 
-                : allOrders
-
-            // 2. Filter by Today
+            const waiterOrders = user?.id ? allOrders.filter(o => o.waiter?.id === user.id) : allOrders
             const todayOrders = waiterOrders.filter(o => isToday(o.opened_at))
-
             setOrders(todayOrders)
-        } catch (e) {
-            console.error(e)
-        }
+        } catch (e) { console.error(e) }
     }, [user])
 
     React.useEffect(() => {
@@ -415,18 +451,12 @@ function WaiterOrdersSection({ user }: { user: any }) {
 
     const filteredOrders = React.useMemo(() => {
         let list = orders
-        if (tab === "active") {
-            list = list.filter(o => !["completed", "cancelled"].includes(o.status))
-        } else {
-            list = list.filter(o => ["completed", "cancelled"].includes(o.status))
-        }
+        if (tab === "active") list = list.filter(o => !["completed", "cancelled"].includes(o.status))
+        else list = list.filter(o => ["completed", "cancelled"].includes(o.status))
+        
         if (search) {
             const q = search.toLowerCase()
-            list = list.filter(o => 
-                o.id.toString().includes(q) || 
-                o.table?.name.toLowerCase().includes(q) ||
-                o.total.toString().includes(q)
-            )
+            list = list.filter(o => o.id.toString().includes(q) || o.table?.name.toLowerCase().includes(q))
         }
         return list.sort((a,b) => b.id - a.id)
     }, [orders, tab, search])
@@ -441,86 +471,60 @@ function WaiterOrdersSection({ user }: { user: any }) {
     return (
         <div className="flex h-full w-full bg-background text-foreground overflow-hidden font-sans">
              {/* LEFT: List */}
-             <div className={cn(
-                 "flex flex-col h-full border-r border-border bg-card transition-all duration-300 z-10 w-full md:w-[400px]",
-                 !isMobileList ? "hidden md:flex" : "flex"
-             )}>
-                 <div className="flex-none p-4 border-b border-border space-y-4 bg-card">
-                     <div className="flex items-center justify-between">
-                         <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
-                             <TabsList className="grid w-full grid-cols-2 bg-muted/50">
-                                 <TabsTrigger value="active">Active</TabsTrigger>
-                                 <TabsTrigger value="history">History</TabsTrigger>
-                             </TabsList>
-                         </Tabs>
-                     </div>
-                     <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted-foreground bg-muted/20 rounded-md">
-                         <CalendarDays className="h-3 w-3" />
-                         <span>Showing orders for Today</span>
-                     </div>
-                     <div className="relative">
-                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                         <Input 
-                             placeholder="Search table, ID..." 
-                             className="pl-9 bg-muted/30 border-input"
-                             value={search}
-                             onChange={e => setSearch(e.target.value)}
-                         />
-                     </div>
-                 </div>
-
-                 <div className="flex-1 overflow-hidden bg-card">
-                     <ScrollArea className="h-full">
-                         <div className="flex flex-col p-2 gap-2 pb-20">
-                             {filteredOrders.length === 0 ? (
-                                 <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-2 opacity-50">
-                                     <Clock className="h-12 w-12 stroke-[1.5]" />
-                                     <p className="text-sm">No orders found for today</p>
-                                 </div>
-                             ) : (
-                                 filteredOrders.map(order => (
-                                     <OrderListItem 
-                                         key={order.id} 
-                                         order={order} 
-                                         active={selectedId === order.id} 
-                                         onClick={() => handleSelect(order.id)} 
-                                     />
-                                 ))
-                             )}
-                         </div>
-                     </ScrollArea>
-                 </div>
+             <div className={cn("flex flex-col h-full border-r border-border bg-card transition-all duration-300 z-10 w-full md:w-[400px]", !isMobileList ? "hidden md:flex" : "flex")}>
+                <div className="flex-none p-4 border-b border-border space-y-4 bg-card">
+                    <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
+                        <TabsList className="grid w-full grid-cols-2 bg-muted/50">
+                            <TabsTrigger value="active">Active</TabsTrigger>
+                            <TabsTrigger value="history">History</TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                    <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted-foreground bg-muted/20 rounded-md">
+                        <CalendarDays className="h-3 w-3" />
+                        <span>Showing orders for Today</span>
+                    </div>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input placeholder="Search table, ID..." className="pl-9 bg-muted/30 border-input" value={search} onChange={e => setSearch(e.target.value)} />
+                    </div>
+                </div>
+                <div className="flex-1 overflow-hidden bg-card">
+                    <ScrollArea className="h-full">
+                        <div className="flex flex-col p-2 gap-2 pb-20">
+                            {filteredOrders.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-2 opacity-50">
+                                    <Clock className="h-12 w-12 stroke-[1.5]" />
+                                    <p className="text-sm">No orders found for today</p>
+                                </div>
+                            ) : (
+                                filteredOrders.map(order => (
+                                    <OrderListItem key={order.id} order={order} active={selectedId === order.id} onClick={() => handleSelect(order.id)} />
+                                ))
+                            )}
+                        </div>
+                    </ScrollArea>
+                </div>
              </div>
-
              {/* RIGHT: Detail View */}
-             <div className={cn(
-                 "flex-1 flex flex-col h-full bg-card md:border-l border-border relative",
-                 isMobileList ? "hidden md:flex" : "flex"
-             )}>
-                 {selectedOrder ? (
-                     <OrderDetailView 
-                         order={selectedOrder} 
-                         onBack={() => setIsMobileList(true)}
-                         actionNode={null} 
-                     />
-                 ) : (
-                     <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-muted/5">
-                         <div className="h-24 w-24 rounded-full bg-muted/50 border border-border flex items-center justify-center mb-6 shadow-sm">
-                             <ArrowRight className="h-10 w-10 opacity-30 text-foreground" />
-                         </div>
-                         <h3 className="text-xl font-semibold text-foreground mb-2">No Order Selected</h3>
-                         <p className="max-w-sm text-muted-foreground text-sm">
-                             Select an order from today's list to view details.
-                         </p>
-                     </div>
-                 )}
+             <div className={cn("flex-1 flex flex-col h-full bg-card md:border-l border-border relative", isMobileList ? "hidden md:flex" : "flex")}>
+                {selectedOrder ? (
+                    <OrderDetailView order={selectedOrder} onBack={() => setIsMobileList(true)} actionNode={null} />
+                ) : (
+                    <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-muted/5">
+                        <div className="h-24 w-24 rounded-full bg-muted/50 border border-border flex items-center justify-center mb-6 shadow-sm">
+                            <ArrowRight className="h-10 w-10 opacity-30 text-foreground" />
+                        </div>
+                        <h3 className="text-xl font-semibold text-foreground mb-2">No Order Selected</h3>
+                        <p className="max-w-sm text-muted-foreground text-sm">Select an order from today's list to view details.</p>
+                    </div>
+                )}
              </div>
         </div>
     )
 }
 
 /* -------------------------------------------------------------------------- */
-/* Shared Views & Helpers                                                      */
+/* Shared Views & Helpers                                                     */
 /* -------------------------------------------------------------------------- */
 
 function isToday(dateStr: string | null) {
@@ -643,7 +647,7 @@ function OrderListItem({ order, active, onClick }: { order: Order, active: boole
             {formatTime(order.opened_at || "")}
           </span>
         </div>
-    
+  
         <div className="flex justify-between items-end w-full">
           <div className="flex flex-col gap-1">
             <StatusBadge status={order.status} mini />
@@ -668,9 +672,9 @@ function StatusBadge({ status, mini }: { status: string, mini?: boolean }) {
       completed: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",
       cancelled: "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border-red-200 dark:border-red-800",
     }[status.toLowerCase()] || "bg-muted text-muted-foreground border-border"
-    
+  
     const label = status.replace("_", " ")
-    
+  
     if (mini) {
       return (
         <span className={cn("text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-md border inline-flex w-fit", styles)}>
@@ -678,7 +682,7 @@ function StatusBadge({ status, mini }: { status: string, mini?: boolean }) {
         </span>
       )
     }
-    
+  
     return (
       <Badge variant="outline" className={cn("capitalize border shadow-none", styles)}>
         {label}
@@ -747,6 +751,8 @@ function TaskFeed({ tasks, onAction }: { tasks: WaiterTask[], onAction: (t: Wait
 
 function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t: WaiterTask) => void, index: number }) {
     const isCritical = task.priority === 'critical' // Claim / New
+    
+    // Summary logic
     const itemsSummary = task.order.items?.map(i => `${i.quantity}x ${i.product?.name}`).join(', ') || "Items loading..."
 
     return (
@@ -754,11 +760,13 @@ function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t:
             className="group relative flex flex-col bg-card border border-border shadow-sm rounded-xl overflow-hidden active:scale-[0.99] transition-all duration-200"
             style={{ animation: `slideUp 0.3s ease-out ${index * 0.05}s backwards` }}
         >
+            {/* Left Brand Strip */}
             <div className={cn("absolute left-0 top-0 bottom-0 w-1.5 z-10", 
                 isCritical ? "bg-primary" : 
                 task.type === 'pickup' ? "bg-orange-500" : "bg-emerald-500"
             )} />
 
+            {/* Ticket Header */}
             <div className="flex justify-between items-start p-4 pb-2 pl-5">
                 <div className="flex items-center gap-3">
                     <div className={cn("h-11 w-11 rounded-lg flex items-center justify-center font-bold text-lg border bg-muted/20",
@@ -783,12 +791,14 @@ function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t:
                 )}
             </div>
 
+            {/* Jagged Line Separator */}
             <div className="relative my-2 pl-1.5">
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 -left-1.5 w-3 h-3 rounded-full bg-muted/10 border-r border-border z-20" />
                 <div className="border-t-2 border-dashed border-border/60 w-full" />
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 -right-1.5 w-3 h-3 rounded-full bg-muted/10 border-l border-border z-20" />
             </div>
 
+            {/* Ticket Body */}
             <div className="px-4 pb-4 pl-5">
                 <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
                     {itemsSummary}
@@ -800,6 +810,7 @@ function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t:
                 )}
             </div>
 
+            {/* Action Footer */}
             <div className="px-4 pb-4 pt-0 pl-5">
                 <Button 
                     onClick={() => onAction(task)} 
@@ -855,11 +866,4 @@ function getTimeDiff(dateStr: string | null) {
 
 function formatMoney(amount: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
-}
-
-function formatTime(dateString: string) {
-  if (!dateString) return "--"
-  return new Date(dateString).toLocaleTimeString('en-US', {
-    hour: '2-digit', minute: '2-digit'
-  })
 }
