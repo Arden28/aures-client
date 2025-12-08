@@ -1,8 +1,8 @@
 {
   "name": "Tapla",
-  "short_name": "MyPWA",
+  "short_name": "Tapla",
   "description": "An installable, real-time app with quick access shortcuts.",
-  "start_url": "/?source=pwa",
+  "start_url": "/?source=tapla",
   
   "display": "standalone", 
   
