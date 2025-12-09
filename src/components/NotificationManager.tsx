@@ -1,5 +1,5 @@
 // Define the base64 URL-safe key
-const VAPID_PUBLIC_KEY: string = '0TEYvSkO2FhWPnpqWL96JDVx1XN5BgeZ1HDfDEydj98CLNrQvz5ewTQxzhtboH_71ijxMHMmfmtjk4ak';
+const VAPID_PUBLIC_KEY: string = 'BPNpfAxYLRWRYM84xeWgqjZQQfjFj9IT6GCaHgkdL6NIigVuv3Qh21yU68AuC8C4L04K9x6eZqFRplhPOnB4qe0';
 
 /**
  * Converts a VAPID public key from a base64 URL-safe string to a Uint8Array.
