@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 // Integration
-import { fetchOrders, updateOrderStatus, type Order } from "@/api/order"
+import { fetchOrders, updateOrderStatus, type Order, type OrderStatusValue } from "@/api/order"
 import { subscribeToKitchen } from "@/api/kds"
 import { toast } from "sonner"
 import useAuth from "@/hooks/useAuth"
@@ -50,6 +50,7 @@ import { useThemeToggle } from "@/layouts/PosLayout"
 
 // Page Components
 import PosTables from "../pos/PosTables"
+import { updateStaffStatus } from "@/api/staff"
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -67,18 +68,47 @@ type CashierTask = {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Helpers: Audio & Notifications                                             */
+/* -------------------------------------------------------------------------- */
+
+const playSound = (type: 'new' | 'ready') => {
+    const file = type === 'new' ? '/sounds/notification.mp3' : '/sounds/notification.mp3'
+    // Fallback to KDS sound if specific files don't exist in your public folder
+    const audio = new Audio(file)
+    audio.volume = 0.7
+    audio.play().catch(e => console.log("Audio play failed (interaction needed):", e))
+}
+
+const sendNotification = (title: string, body: string) => {
+    if (!("Notification" in window)) return
+    
+    if (Notification.permission === "granted") {
+        new Notification(title, { body, icon: "/images/icon.png" }) // Adjust icon path
+    }
+}
+
+const requestNotificationAccess = () => {
+    if ("Notification" in window && Notification.permission !== "granted") {
+        Notification.requestPermission()
+    }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Main Component                                                             */
 /* -------------------------------------------------------------------------- */
 
 export default function CashierPage() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, logout, refresh } = useAuth()
   const { theme, toggleTheme } = useThemeToggle()
   
   const [isOnline, setIsOnline] = React.useState(false)
   const [activeTab, setActiveTab] = React.useState("feed")
   const [tasks, setTasks] = React.useState<CashierTask[]>([])
   const [isConnected, setIsConnected] = React.useState(false)
+  const [statusFilter, setStatusFilter] = React.useState<
+          "all" | OrderStatusValue
+      >("all")
   
   // Dynamic Stats State
   const [dailyStats, setDailyStats] = React.useState({ toCollect: 0, collected: 0, count: 0 })
@@ -89,57 +119,85 @@ export default function CashierPage() {
   // Safe User Data
   const userName = (user as any)?.name || "Staff"
   const userRole = (user as any)?.role || "Cashier"
+    
+    // -- Sync isOnline --
+    React.useEffect(() => {
+      if (user) setIsOnline((user as any).status === 'active')
+    }, [user])
+  
+    // -- Handlers --
+    const handleShiftToggle = async (checked: boolean) => {
+      setIsOnline(checked)
+      if (checked) requestNotificationAccess()
+      
+      try {
+          const newStatus = checked ? 'active' : 'inactive'
+          await updateStaffStatus((user as any)?.id, newStatus)
+          toast.success(checked ? "Shift Started" : "Shift Ended", {
+              description: checked ? "You are now receiving orders." : "You are now offline."
+          })
+          if (refresh) refresh()
+      } catch (error) {
+          setIsOnline(!checked)
+          toast.error("Failed to update status")
+      }
+    }
   
   // -- Data Fetching & Logic --
   const refreshData = React.useCallback(async () => {
     if (!isOnline) return
-    try {
-      const [orderData] = await Promise.all([fetchOrders({ per_page: 100 })])
-      const allOrders = Array.isArray(orderData) ? orderData : orderData.items
-      
-      // Filter for Today Only
-      const todayOrders = allOrders.filter(o => isToday(o.opened_at))
-
-      // 1. Calculate Stats
-      const completedOrders = todayOrders.filter(o => o.status === 'completed')
-      const unpaidOrders = todayOrders.filter(o => o.status !== 'cancelled' && o.status !== 'completed' && o.payment_status === 'unpaid')
-      
-      const collected = completedOrders.reduce((acc, o) => acc + o.total, 0)
-      const toCollect = unpaidOrders.reduce((acc, o) => acc + o.total, 0)
-
-      setDailyStats({ count: completedOrders.length, collected, toCollect })
-
-      // 2. Build Payment Tasks (Feed)
-      const newTasks: CashierTask[] = []
-      
-      todayOrders.forEach(order => {
-        // Condition: Not cancelled, not completed, and UNPAID
-        if (order.status !== 'cancelled' && order.status !== 'completed' && order.payment_status === 'unpaid') {
-             
-             // Priority logic: Served orders are waiting to leave (High priority)
-             const isPriority = order.status === 'served' || order.status === 'ready'
-
-             newTasks.push({
-                id: `pay-${order.id}`,
-                title: `Table ${order.table?.name || 'Takeout'}`,
-                subtitle: `Order #${order.id} • ${order.items?.length || 0} Items`,
-                time: getTimeDiff(order.opened_at),
-                amount: order.total,
-                priority: isPriority ? 'high' : 'medium',
-                refId: order.id,
-                order: order
-             })
+        try {
+                
+        const filters: { status?: OrderStatusValue; per_page?: number } = {
+            per_page: 100,
         }
-      })
-      
-      // Sort: High priority first, then oldest first
-      setTasks(newTasks.sort((a,b) => {
-          if (a.priority === b.priority) return 0 // Keep stable sort or use time
-          return a.priority === 'high' ? -1 : 1
-      }))
+        if (statusFilter !== "all") {
+            filters.status = statusFilter
+        }
+                
+        const { items } = await fetchOrders(filters)
+        const allOrders = items || []
 
-    } catch (e) { console.error("Refresh Error:", e) }
-  }, [isOnline])
+        // 1. Calculate Stats
+        const completedOrders = allOrders.filter(o => o.status === 'completed')
+        const unpaidOrders = allOrders.filter(o => o.status !== 'cancelled' && o.status !== 'completed' && o.payment_status === 'unpaid')
+        
+        const collected = completedOrders.reduce((acc, o) => acc + o.total, 0)
+        const toCollect = unpaidOrders.reduce((acc, o) => acc + o.total, 0)
+
+        setDailyStats({ count: completedOrders.length, collected, toCollect })
+
+        // 2. Build Payment Tasks (Feed)
+        const newTasks: CashierTask[] = []
+        
+        allOrders.forEach(order => {
+            // Condition: Not cancelled, not completed, and UNPAID
+            if (order.status !== 'cancelled' && order.status !== 'completed' && order.payment_status === 'unpaid') {
+                
+                // Priority logic: Served orders are waiting to leave (High priority)
+                const isPriority = order.status === 'served' || order.status === 'ready'
+
+                newTasks.push({
+                    id: `pay-${order.id}`,
+                    title: `Table ${order.table?.name || 'Takeout'}`,
+                    subtitle: `Order #${order.id} • ${order.items?.length || 0} Items`,
+                    time: getTimeDiff(order.opened_at),
+                    amount: order.total,
+                    priority: isPriority ? 'high' : 'medium',
+                    refId: order.id,
+                    order: order
+                })
+            }
+        })
+        
+        // Sort: High priority first, then oldest first
+        setTasks(newTasks.sort((a,b) => {
+            if (a.priority === b.priority) return 0 // Keep stable sort or use time
+            return a.priority === 'high' ? -1 : 1
+        }))
+
+        } catch (e) { console.error("Refresh Error:", e) }
+  }, [isOnline, statusFilter])
 
   // -- Realtime Subscription --
   React.useEffect(() => {
@@ -339,16 +397,25 @@ function CashierHistorySection() {
     const [search, setSearch] = React.useState("")
     const [selectedId, setSelectedId] = React.useState<number | null>(null)
     const [isMobileList, setIsMobileList] = React.useState(true)
+    const [statusFilter, setStatusFilter] = React.useState<
+    "all" | OrderStatusValue
+    >("all")
 
     const loadOrders = React.useCallback(async () => {
         try {
-            const res = await fetchOrders({ per_page: 100 })
-            const allOrders = res.items || []
+
+            const filters: { status?: OrderStatusValue; per_page?: number } = { per_page: 100 }
+            
+            if (statusFilter !== "all") {
+                filters.status = statusFilter
+            }
+
+            const { items } = await fetchOrders(filters)
+            const allOrders = items || []
             // Cashier sees ALL orders from Today
-            const todayOrders = allOrders.filter(o => isToday(o.opened_at))
-            setOrders(todayOrders)
+            setOrders(allOrders)
         } catch (e) { console.error(e) }
-    }, [])
+    }, [statusFilter])
 
     React.useEffect(() => {
         loadOrders()
@@ -398,6 +465,7 @@ function CashierHistorySection() {
                     <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted-foreground bg-muted/20 rounded-md">
                         <CalendarDays className="h-3 w-3" />
                         <span>Daily Transactions</span>
+                        {/* <pre>{JSON.stringify(orders, null, 2)}</pre> */}
                     </div>
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -581,15 +649,6 @@ function PaymentCard({ task, onAction, index }: { task: CashierTask, onAction: (
     )
 }
 
-// Reusing Helpers and Shared Views
-function isToday(dateStr: string | null) {
-    if (!dateStr) return false
-    const date = new Date(dateStr)
-    const today = new Date()
-    return date.getDate() === today.getDate() &&
-           date.getMonth() === today.getMonth() &&
-           date.getFullYear() === today.getFullYear()
-}
 
 function OrderDetailView({ order, onBack, actionNode }: { order: Order, onBack: () => void, actionNode?: React.ReactNode }) {
     const tax = (order.subtotal || 0) * 0.10
@@ -687,7 +746,7 @@ function OrderListItem({ order, active, onClick }: { order: Order, active: boole
         
         <div className="flex justify-between items-start w-full">
           <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="font-mono text-xs px-1.5 py-0.5 h-5">
+            <Badge variant="secondary" className="font-mono text-xs text-white px-1.5 py-0.5 h-5">
               #{order.id}
             </Badge>
             <span className="font-semibold text-foreground truncate max-w-[120px]">

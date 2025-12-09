@@ -23,7 +23,8 @@ import {
   Search,
   Filter,
   CalendarDays,
-  Map
+  Map,
+  HandPlatter
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -110,6 +111,9 @@ export default function WaiterPage() {
   const [activeTab, setActiveTab] = React.useState("feed")
   const [tasks, setTasks] = React.useState<WaiterTask[]>([])
   const [isConnected, setIsConnected] = React.useState(false)
+  const [statusFilter, setStatusFilter] = React.useState<
+        "all" | OrderStatusValue
+    >("all")
   
   // Dynamic Stats State
   const [dailyStats, setDailyStats] = React.useState({ completed: 0, sales: 0 })
@@ -148,21 +152,28 @@ export default function WaiterPage() {
   const refreshData = React.useCallback(async () => {
     if (!isOnline) return
     try {
-      const [orderData] = await Promise.all([fetchOrders({ per_page: 100 })])
-      const allOrders = Array.isArray(orderData) ? orderData : orderData.items
-      const todayOrders = allOrders.filter(o => isToday(o.opened_at))
+        
+      const filters: { status?: OrderStatusValue; per_page?: number } = {
+          per_page: 100,
+      }
+      if (statusFilter !== "all") {
+          filters.status = statusFilter
+      }
+        
+      const { items } = await fetchOrders(filters)
+      const allOrders = items || []
 
       // Stats
-      const completedOrders = todayOrders.filter(o => o.status === 'completed')
+      const completedOrders = allOrders.filter(o => o.status === 'completed')
       const totalSales = completedOrders.reduce((acc, o) => acc + o.total, 0)
       setDailyStats({ completed: completedOrders.length, sales: totalSales })
 
       // Build Tasks
       const newTasks: WaiterTask[] = []
       
-      todayOrders.forEach(order => {
+      allOrders.forEach(order => {
         // 1. CLAIM
-        if (order.status === 'pending' || (order.status === 'submitted' && !order.waiter)) {
+        if (order.status === 'pending' && !order.waiter) {
              newTasks.push({
                 id: `claim-${order.id}`,
                 type: 'claim',
@@ -221,7 +232,7 @@ export default function WaiterPage() {
       }))
 
     } catch (e) { console.error("Refresh Error:", e) }
-  }, [isOnline])
+  }, [isOnline, statusFilter])
 
   // -- Realtime Subscription --
   React.useEffect(() => {
@@ -438,7 +449,7 @@ export default function WaiterPage() {
              <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
                  <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Bell} label="" badge={tasks.length} />
                  <div className="w-px h-5 bg-border mx-1" />
-                 <NavBarItem active={activeTab === 'tables'} onClick={() => setActiveTab('floor')} icon={Map} label="Tables" />
+                 <NavBarItem active={activeTab === 'tables'} onClick={() => setActiveTab('tables')} icon={HandPlatter} label="Tables" />
                  <div className="w-px h-5 bg-border mx-1" />
                  <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={ForkKnife} label="Orders" />
              </nav>
@@ -476,8 +487,6 @@ function WaiterOrdersSection({ user }: { user: any }) {
             const { items } = await fetchOrders(filters)
 
             setOrders(items || [])
-            const todayOrders = items.filter(o => isToday(o.opened_at))
-            setOrders(todayOrders)
         } catch (e) { console.error(e) }
     }, [statusFilter])
 
@@ -566,15 +575,6 @@ function WaiterOrdersSection({ user }: { user: any }) {
 /* Shared Views & Helpers                                                     */
 /* -------------------------------------------------------------------------- */
 
-function isToday(dateStr: string | null) {
-    if (!dateStr) return false
-    const date = new Date(dateStr)
-    const today = new Date()
-    return date.getDate() === today.getDate() &&
-           date.getMonth() === today.getMonth() &&
-           date.getFullYear() === today.getFullYear()
-}
-
 // Unified Order Detail View
 function OrderDetailView({ order, onBack, actionNode }: { order: Order, onBack: () => void, actionNode?: React.ReactNode }) {
     const tax = (order.subtotal || 0) * 0.10
@@ -597,6 +597,8 @@ function OrderDetailView({ order, onBack, actionNode }: { order: Order, onBack: 
                             <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {order.table?.name || 'Table'}</span>
                             <span>•</span>
                             <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {getTimeDiff(order.opened_at)}</span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {order.waiter?.name}</span>
                         </div>
                     </div>
                 </div>
@@ -675,7 +677,7 @@ function OrderListItem({ order, active, onClick }: { order: Order, active: boole
         
         <div className="flex justify-between items-start w-full">
           <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="font-mono text-xs px-1.5 py-0.5 h-5">
+            <Badge variant="secondary" className="font-mono text-xs text-white px-1.5 py-0.5 h-5">
               #{order.id}
             </Badge>
             <span className="font-semibold text-foreground truncate max-w-[120px]">
@@ -850,7 +852,7 @@ function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t:
             </div>
 
             {/* Action Footer */}
-            <div className="px-4 pb-4 pt-0 pl-5 ">
+            <div className={`px-4 pb-4 pt-0 pl-5 ${task.type === 'payment' ? 'hidden' : ''} `}>
                 <Button 
                     onClick={() => onAction(task)} 
                     className={cn("w-full font-semibold text-white shadow-sm h-11 rounded-lg text-sm", 
