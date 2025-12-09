@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 // Integration
-import { fetchOrders, updateOrderStatus, type Order } from "@/api/order"
+import { fetchOrders, updateOrderStatus, type Order, type OrderStatusValue, type PaymentStatusValue } from "@/api/order"
 import { subscribeToKitchen, type KDSOrder } from "@/api/kds"
 import { updateStaffStatus } from "@/api/staff"
 import { toast } from "sonner"
@@ -438,7 +438,7 @@ export default function WaiterPage() {
              <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
                  <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Bell} label="" badge={tasks.length} />
                  <div className="w-px h-5 bg-border mx-1" />
-                 <NavBarItem active={activeTab === 'floor'} onClick={() => setActiveTab('floor')} icon={Map} label="Floor" />
+                 <NavBarItem active={activeTab === 'tables'} onClick={() => setActiveTab('floor')} icon={Map} label="Tables" />
                  <div className="w-px h-5 bg-border mx-1" />
                  <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={ForkKnife} label="Orders" />
              </nav>
@@ -458,17 +458,28 @@ function WaiterOrdersSection({ user }: { user: any }) {
     const [search, setSearch] = React.useState("")
     const [selectedId, setSelectedId] = React.useState<number | null>(null)
     const [isMobileList, setIsMobileList] = React.useState(true)
+    const [statusFilter, setStatusFilter] = React.useState<
+        "all" | OrderStatusValue
+    >("all")
+    
 
     // Fetch Orders
     const loadOrders = React.useCallback(async () => {
         try {
-            const res = await fetchOrders({ per_page: 100 })
-            const allOrders = res.items || []
-            const waiterOrders = user?.id ? allOrders.filter(o => o.waiter?.id === user.id) : allOrders
-            const todayOrders = waiterOrders.filter(o => isToday(o.opened_at))
+              const filters: { status?: OrderStatusValue; per_page?: number } = {
+                per_page: 100,
+              }
+              if (statusFilter !== "all") {
+                filters.status = statusFilter
+              }
+        
+            const { items } = await fetchOrders(filters)
+
+            setOrders(items || [])
+            const todayOrders = items.filter(o => isToday(o.opened_at))
             setOrders(todayOrders)
         } catch (e) { console.error(e) }
-    }, [user])
+    }, [statusFilter])
 
     React.useEffect(() => {
         loadOrders()
@@ -478,7 +489,7 @@ function WaiterOrdersSection({ user }: { user: any }) {
 
     const filteredOrders = React.useMemo(() => {
         let list = orders
-        if (tab === "active") list = list.filter(o => !["completed", "cancelled"].includes(o.status))
+        if (tab === "active") list = list.filter(o => ["pending", "preparing", "ready", "served"].includes(o.status))
         else list = list.filter(o => ["completed", "cancelled"].includes(o.status))
         
         if (search) {
@@ -509,6 +520,7 @@ function WaiterOrdersSection({ user }: { user: any }) {
                     <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted-foreground bg-muted/20 rounded-md">
                         <CalendarDays className="h-3 w-3" />
                         <span>Showing orders for Today</span>
+                        {/* <pre>{JSON.stringify(orders, null, 2)}</pre> */}
                     </div>
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -838,7 +850,7 @@ function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t:
             </div>
 
             {/* Action Footer */}
-            <div className="px-4 pb-4 pt-0 pl-5 hidden">
+            <div className="px-4 pb-4 pt-0 pl-5 ">
                 <Button 
                     onClick={() => onAction(task)} 
                     className={cn("w-full font-semibold text-white shadow-sm h-11 rounded-lg text-sm", 
