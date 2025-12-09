@@ -68,6 +68,7 @@ export type Order = {
   paid_amount: number
   payment_status: PaymentStatusValue
 
+  updated_at: string | null
   opened_at: string | null
   closed_at: string | null
 

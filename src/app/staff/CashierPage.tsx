@@ -321,7 +321,7 @@ export default function CashierPage() {
              <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
                  <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Banknote} label="Pay" badge={tasks.length} />
                  <div className="w-px h-5 bg-border mx-1" />
-                 <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={Receipt} label="Txns" />
+                 <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={Receipt} label="Transactions" />
              </nav>
           </div>
       )}
@@ -571,7 +571,7 @@ function PaymentCard({ task, onAction, index }: { task: CashierTask, onAction: (
                     onClick={() => onAction(task)} 
                     className={cn("w-full font-semibold shadow-sm h-11 rounded-lg text-sm", 
                         isPriority ? "bg-emerald-600 text-white hover:bg-emerald-700" : 
-                        "bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"
+                        "bg-secondary text-white hover:bg-secondary/80 border border-border"
                     )}
                 >
                     Process Payment <ArrowRight className="ml-auto h-4 w-4 opacity-50" />

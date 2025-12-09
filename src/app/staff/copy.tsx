@@ -22,8 +22,7 @@ import {
   Receipt,
   Search,
   Filter,
-  CalendarDays,
-  Map
+  CalendarDays
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -87,7 +86,7 @@ const requestNotificationAccess = () => {
 
 type WaiterTask = {
   id: string
-  type: "claim" | "pickup" | "payment" | "clear"
+  type: "claim" | "pickup" | "payment"
   title: string
   subtitle: string
   time: string
@@ -109,6 +108,7 @@ export default function WaiterPage() {
   const [isOnline, setIsOnline] = React.useState((user as any)?.status === 'active')
   const [activeTab, setActiveTab] = React.useState("feed")
   const [tasks, setTasks] = React.useState<WaiterTask[]>([])
+  const tasksRef = React.useRef(tasks)
   const [isConnected, setIsConnected] = React.useState(false)
   
   // Dynamic Stats State
@@ -125,6 +125,10 @@ export default function WaiterPage() {
   React.useEffect(() => {
     if (user) setIsOnline((user as any).status === 'active')
   }, [user])
+
+  React.useEffect(() => {
+    tasksRef.current = tasks
+  }, [tasks])
 
   // -- Handlers --
   const handleShiftToggle = async (checked: boolean) => {
@@ -200,19 +204,6 @@ export default function WaiterPage() {
                 order: order
             })
         }
-        // 3. CLEAR TABLE
-        if (order.status === 'served' && order.table?.status == 'occupied' && order.payment_status === 'paid') {
-            newTasks.push({
-                id: `clear-${order.id}`,
-                type: 'clear',
-                title: `Ready for cleaning • Table ${order.table?.name || '??'}`,
-                subtitle: `This table can be cleared for new guests.`,
-                time: 'Active',
-                priority: 'medium',
-                refId: order.id,
-                order: order
-            })
-        }
       })
       
       setTasks(newTasks.sort((a,b) => {
@@ -262,12 +253,121 @@ export default function WaiterPage() {
     return () => { unsubscribe(); setIsConnected(false) }
   }, [isOnline, refreshData])
 
+  // Convert API Orders -> Waiter Tasks
+  const generateTasksFromOrders = (orders: Order[]) => {
+      const newTasks: WaiterTask[] = []
+      
+      orders.forEach(order => {
+        // 1. CLAIM TASK (Pending)
+        if (order.status === 'pending' || (order.status === 'served' && !order.waiter)) {
+             newTasks.push({
+                id: `claim-${order.id}`,
+                type: 'claim',
+                title: `New Order • Table ${order.table?.name || '??'}`,
+                subtitle: `${order.items?.length || 0} Items • Waiting for confirmation`,
+                time: getTimeDiff(order.opened_at),
+                priority: 'critical', 
+                refId: order.id,
+                order: order
+             })
+        }
+        // 2. PICKUP TASK (Ready)
+        if (order.status === 'ready') {
+            newTasks.push({
+                id: `ready-${order.id}`,
+                type: 'pickup',
+                title: `Order Ready • Table ${order.table?.name || '??'}`,
+                subtitle: `Ticket #${order.id} • Pickup at Pass`,
+                time: getTimeDiff(order.updated_at),
+                priority: 'high',
+                refId: order.id,
+                order: order
+            })
+        }
+        // 3. PAYMENT TASK
+        if (order.status === 'served' && order.payment_status === 'unpaid') {
+            newTasks.push({
+                id: `pay-${order.id}`,
+                type: 'payment',
+                title: `Payment • Table ${order.table?.name || '??'}`,
+                subtitle: `Pending ${formatMoney(order.total)}`,
+                time: 'Active',
+                priority: 'medium',
+                refId: order.id,
+                order: order
+            })
+        }
+      })
+      
+      return newTasks.sort((a,b) => {
+          const map = { critical: 0, high: 1, medium: 2 }
+          return map[a.priority] - map[b.priority]
+      })
+  }
+
+
+// [ADD THIS] Polling for New Tasks
+  React.useEffect(() => {
+    if (!isOnline) return
+
+    const POLL_INTERVAL = 10000 // 10 Seconds
+
+    const pollForUpdates = async () => {
+      try {
+        // 1. Fetch latest data
+        const [orderData] = await Promise.all([fetchOrders({ per_page: 100 })])
+        const allOrders = Array.isArray(orderData) ? orderData : orderData.items
+        
+        // 2. Filter & Process
+        const todayOrders = allOrders.filter(o => isToday(o.opened_at))
+        const freshTasks = generateTasksFromOrders(todayOrders)
+        
+        // 3. Compare with Current State (via Ref)
+        const currentTasks = tasksRef.current
+        const currentIds = new Set(currentTasks.map(t => t.id))
+        
+        // 4. Detect NEW "Claim" tasks (New Orders)
+        const newClaimTasks = freshTasks.filter(t => t.type === 'claim' && !currentIds.has(t.id))
+
+        if (newClaimTasks.length > 0) {
+             playSound('new')
+             sendNotification("New Order", `${newClaimTasks.length} New Order(s) Received!`)
+             toast.info(`${newClaimTasks.length} New Order(s) Received!`)
+        }
+
+        // 5. Update State if different
+        // (We stick to stringify for a cheap deep comparison of the list structure)
+        if (JSON.stringify(freshTasks) !== JSON.stringify(currentTasks)) {
+             setTasks(freshTasks)
+             
+             // Update stats too while we are here
+             const completed = todayOrders.filter(o => o.status === 'completed').length
+             const sales = todayOrders.filter(o => o.status === 'completed').reduce((acc, o) => acc + o.total, 0)
+             setDailyStats({ completed, sales })
+        }
+        
+        setIsConnected(true)
+
+      } catch (e) {
+        console.error("Polling failed", e)
+        setIsConnected(false)
+      }
+    }
+
+    // Trigger immediately on mount, then interval
+    pollForUpdates()
+    const intervalId = setInterval(pollForUpdates, POLL_INTERVAL)
+    
+    return () => clearInterval(intervalId)
+  }, [isOnline])
+
+
   // -- Task Actions --
   const handleTaskAction = async (task: WaiterTask) => {
-    //   if (task.type === 'payment') {
-    //     setSelectedPaymentTask(task)
-    //     return
-    //   }
+      if (task.type === 'payment') {
+        setSelectedPaymentTask(task)
+        return
+      }
 
       setTasks(prev => prev.filter(t => t.id !== task.id))
       
@@ -437,8 +537,6 @@ export default function WaiterPage() {
           <div className="absolute bottom-6 left-0 right-0 flex justify-center z-50 pointer-events-none animate-in slide-in-from-bottom-6 fade-in duration-500">
              <nav className="pointer-events-auto flex items-center gap-1 p-1.5 bg-background/90 backdrop-blur-xl border border-border/50 rounded-full shadow-2xl shadow-primary/5 ring-1 ring-black/5 dark:ring-white/10">
                  <NavBarItem active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={Bell} label="" badge={tasks.length} />
-                 <div className="w-px h-5 bg-border mx-1" />
-                 <NavBarItem active={activeTab === 'floor'} onClick={() => setActiveTab('floor')} icon={Map} label="Floor" />
                  <div className="w-px h-5 bg-border mx-1" />
                  <NavBarItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={ForkKnife} label="Orders" />
              </nav>
@@ -838,7 +936,7 @@ function TicketCard({ task, onAction, index }: { task: WaiterTask, onAction: (t:
             </div>
 
             {/* Action Footer */}
-            <div className="px-4 pb-4 pt-0 pl-5 hidden">
+            <div className="px-4 pb-4 pt-0 pl-5">
                 <Button 
                     onClick={() => onAction(task)} 
                     className={cn("w-full font-semibold text-white shadow-sm h-11 rounded-lg text-sm", 
