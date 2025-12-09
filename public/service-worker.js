@@ -3,8 +3,8 @@ const CACHE_NAME = 'tapla-static-v1';
 const urlsToCache = [
   '/',                     // The root page (index.html)
   '/index.html',           // Explicitly cache index
-  '/main.css',             // Your main styles
-  '/main.js',              // Your main bundled script
+//   '/index.css',             // main styles
+//   '/main.js',              // main bundled script
   '/images/icon.png',      // Critical icon
   // Add other critical static assets here
 ];

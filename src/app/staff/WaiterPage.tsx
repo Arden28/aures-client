@@ -212,7 +212,7 @@ export default function WaiterPage() {
             })
         }
         // 3. CLEAR TABLE
-        if (order.status === 'served' && order.table?.status == 'occupied' && order.payment_status === 'paid') {
+        if (order.status === 'served' && order.payment_status === 'paid') {
             newTasks.push({
                 id: `clear-${order.id}`,
                 type: 'clear',
