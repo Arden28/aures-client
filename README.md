@@ -97,7 +97,7 @@ It is divided into three distinct synchronized interfaces:
 ### 1. Clone the repository
 ```bash
 
-git clone [https://github.com/your-username/tapla-frontend.git](https://github.com/your-username/tapla-frontend.git)
+git clone https://github.com/your-username/tapla-frontend.git
 cd tapla-frontend
 
 ```
@@ -123,7 +123,7 @@ Update the variables with your configuration:
 ```bash
 
 # API Connection
-VITE_API_URL=[https://api.your-domain.com](https://api.your-domain.com)
+VITE_API_URL=https://api.your-domain.com
 
 # Real-time Configuration (Pusher)
 VITE_PUSHER_APP_KEY=your_pusher_key
@@ -141,7 +141,8 @@ The app will be available at http://localhost:5173.
 
 
 ## 🏗 Project Structure
-Bash
+
+``` bash
 
 src/
 ├── api/            # Axios instances and API service functions
@@ -157,6 +158,7 @@ src/
 ├── lib/            # Utilities (Echo, cn helper, etc.)
 └── types/          # TypeScript interfaces
 
+```
 
 <!-- ## 🤝 Contributing
 Contributions are welcome! Please follow these steps:
