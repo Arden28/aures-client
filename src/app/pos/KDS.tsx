@@ -571,16 +571,28 @@ function useElapsedTimer(openedAt: string | null) {
 
   React.useEffect(() => {
     if (!openedAt) return
-    const start = new Date(openedAt).getTime()
+
+    // FIX: Force UTC interpretation if timezone is missing
+    let cleanDateStr = openedAt
+    if (!openedAt.endsWith("Z") && !openedAt.includes("+")) {
+      cleanDateStr += "Z"
+    }
+
+    const start = new Date(cleanDateStr).getTime()
+
     const update = () => {
       const now = new Date().getTime()
-      const diff = Math.max(0, now - start)
+      // Math.max(0, ...) prevents negative time if local clock is slightly behind
+      const diff = Math.max(0, now - start) 
+
       const m = Math.floor(diff / 60000)
       const s = Math.floor((diff % 60000) / 1000)
+
       setMinutes(m)
       setTime(`${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`)
     }
-    update()
+
+    update() // Run immediately to avoid 1s delay
     const interval = setInterval(update, 1000)
     return () => clearInterval(interval)
   }, [openedAt])

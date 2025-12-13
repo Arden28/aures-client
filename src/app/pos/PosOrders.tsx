@@ -24,7 +24,7 @@ import {
   Utensils
 } from "lucide-react"
 
-import { cn } from "@/lib/utils"
+import { cn, formatMoney } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -655,12 +655,6 @@ function ModeButton({ mode, active, onClick, icon, label }: { mode: string, acti
   )
 }
 
-function formatMoney(amount: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount)
-}
 
 function formatTime(dateString: string) {
   if (!dateString) return "--"

@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 
 import { CURRENCIES, type CurrencyOption } from "@/lib/constants" // Added CURRENCIES import
+import { fetchRestaurant } from "@/api/restaurant";
 
 export function cn(...inputs: ClassValue[]) {
  return twMerge(clsx(inputs))
@@ -22,49 +23,64 @@ export function getErrorMessage(e: unknown): string {
  return "Unexpected error";
 }
 
+// Initialize Global Default (Mutable)
+// We default to 'USD' immediately so the app can render, 
+// then update it asynchronously when the API responds.
+let APP_CURRENCY_CODE = 'USD';
+
+fetchRestaurant().then(r => {
+    if (r?.currency) {
+        APP_CURRENCY_CODE = r.currency;
+    }
+}).catch(() => {
+    console.warn("Failed to load restaurant currency settings. Defaulting to USD.");
+});
+
 /**
- * Gets the full CurrencyOption object from the list by its 3-letter code.
- * Defaults to USD if the code is not found.
- * * @param currencyCode The 3-letter currency code (e.g., 'KES').
- * @returns The full CurrencyOption configuration.
+ * Gets the full CurrencyOption object by code.
+ * Defaults to USD if code not found.
  */
 export function getCurrencyConfig(currencyCode: string): CurrencyOption {
     return CURRENCIES.find(c => c.value === currencyCode) ?? CURRENCIES.find(c => c.value === 'USD')!;
 }
 
 /**
- * Formats a monetary amount based on custom currency settings.
- *
- * @param amount The numerical amount to format.
- * @param currency The CurrencyOption object OR the currency code (string).
- * @returns The formatted string (e.g., "$1,234.56" or "1 234,56 €").
+ * Formats a monetary amount.
+ * * @param amount - The numerical amount.
+ * @param currencyInput - (Optional) Specific currency code or config. 
+ * If omitted, uses the App's global default.
  */
-export function formatMoney(amount: number, currency: CurrencyOption | string): string {
-    let currencyConfig: CurrencyOption;
-    
-    if (typeof currency === 'string') {
-        // Look up the configuration if only the code string is passed
-        currencyConfig = getCurrencyConfig(currency);
+export function formatMoney(amount: number, currencyInput?: CurrencyOption | string): string {
+    let config: CurrencyOption;
+
+    // 1. Determine which code/config to use
+    if (!currencyInput) {
+        // No argument? Use the global app default
+        config = getCurrencyConfig(APP_CURRENCY_CODE);
+    } else if (typeof currencyInput === 'string') {
+        // String argument? Look it up
+        config = getCurrencyConfig(currencyInput);
     } else {
-        currencyConfig = currency;
+        // Object argument? Use it directly
+        config = currencyInput;
     }
 
- const { symbol, position, precision } = currencyConfig
+    const { symbol, position, precision } = config;
 
- // Use Intl.NumberFormat for locale-specific grouping and decimal separators,
- // but without the currency symbol, as we add it manually for flexibility.
- const formattedAmount = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: precision,
-  maximumFractionDigits: precision,
-  useGrouping: true,
- }).format(amount)
+    // 2. Format the number
+    const formattedAmount = new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: precision,
+        maximumFractionDigits: precision,
+        useGrouping: true,
+    }).format(amount);
 
- if (position === 'before') {
-  return `${symbol}${formattedAmount}`
- } else {
-  // Add a non-breaking space for aesthetics after the amount
-  return `${formattedAmount}\u00A0${symbol}`
- }
+    // 3. Return string with correct symbol position
+    if (position === 'before') {
+        return `${symbol}${formattedAmount}`;
+    } else {
+        // \u00A0 is a non-breaking space
+        return `${formattedAmount}\u00A0${symbol}`;
+    }
 }
 
 /**
@@ -90,31 +106,40 @@ export function formatTime(dateString: string | null, timezone: string): string 
 
 /**
  * Calculates the time difference between now and a given date string.
+ * Automatically handles UTC conversion to prevent timezone offsets (e.g. starting at 60m).
  *
- * @param dateStr The ISO 8601 date string to compare against (e.g., order start time).
+ * @param dateStr The ISO 8601 date string (e.g. "2023-10-25T12:00:00").
  * @returns The time difference string (e.g., "5m ago" or "Just now").
  */
 export function getTimeDiff(dateStr: string | null): string {
- if (!dateStr) return "Just now"
- 
- const startTime = new Date(dateStr).getTime()
- const currentTime = new Date().getTime() 
- 
- // Difference in milliseconds
- const diffMs = currentTime - startTime
- 
- // Difference in minutes
- const diffMinutes = Math.floor(diffMs / 60000)
+  if (!dateStr) return "Just now"
 
- if (diffMinutes < 1) {
-  return "Just now"
- } else if (diffMinutes < 60) {
-  return `${diffMinutes}m ago`
- } else if (diffMinutes < 24 * 60) {
-  const diffHours = Math.floor(diffMinutes / 60)
-  return `${diffHours}h ago`
- } else {
-  const diffDays = Math.floor(diffMinutes / (24 * 60))
-  return `${diffDays}d ago`
- }
+  // FIX: Force UTC interpretation if the string doesn't specify a timezone.
+  // Browsers default to Local Time if 'Z' or offset is missing, causing the "60m" gap.
+  let cleanDateStr = dateStr
+  if (!dateStr.endsWith("Z") && !dateStr.includes("+")) {
+      cleanDateStr += "Z"
+  }
+
+  const startTime = new Date(cleanDateStr).getTime()
+  const currentTime = new Date().getTime() 
+
+  // Difference in milliseconds
+  // We use Math.max(0, ...) to prevent negative numbers if client clock is slightly behind
+  const diffMs = Math.max(0, currentTime - startTime)
+
+  // Difference in minutes
+  const diffMinutes = Math.floor(diffMs / 60000)
+
+  if (diffMinutes < 1) {
+    return "Just now"
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`
+  } else if (diffMinutes < 24 * 60) {
+    const diffHours = Math.floor(diffMinutes / 60)
+    return `${diffHours}h ago`
+  } else {
+    const diffDays = Math.floor(diffMinutes / (24 * 60))
+    return `${diffDays}d ago`
+  }
 }

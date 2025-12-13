@@ -26,7 +26,7 @@ import {
   Map,
   HandPlatter
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, formatMoney, getTimeDiff } from "@/lib/utils"
 
 // UI Components
 import { Button } from "@/components/ui/button"
@@ -45,6 +45,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
+import { FloorPlan } from "@/components/pos/FloorPlan"
+
 // Integration
 import { fetchOrders, updateOrderStatus, type Order, type OrderStatusValue, type PaymentStatusValue } from "@/api/order"
 import { subscribeToKitchen, type KDSOrder } from "@/api/kds"
@@ -53,8 +55,6 @@ import { toast } from "sonner"
 import useAuth from "@/hooks/useAuth"
 import { useThemeToggle } from "@/layouts/PosLayout"
 
-// Page Components
-import PosTables from "@/app/pos/PosTables"
 
 /* -------------------------------------------------------------------------- */
 /* Helpers: Audio & Notifications                                             */
@@ -435,7 +435,7 @@ export default function WaiterPage() {
               </TabsContent>
 
               <TabsContent value="tables" className="h-full mt-0 data-[state=inactive]:hidden">
-                    <div className="h-full pb-20"><PosTables /></div>
+                    <div className="h-full pb-20"><FloorPlan setActiveTab={setActiveTab} /></div>
               </TabsContent>
               <TabsContent value="orders" className="h-full mt-0 data-[state=inactive]:hidden">
                     <WaiterOrdersSection user={user} />
@@ -899,15 +899,7 @@ function StatChip({ label, value, active }: any) {
     )
 }
 
-function getTimeDiff(dateStr: string | null) {
-  if(!dateStr) return "Just now"
-  const diff = Math.floor((new Date().getTime() - new Date(dateStr).getTime()) / 60000)
-  return diff < 1 ? "Just now" : `${diff}m ago`
-}
 
-function formatMoney(amount: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
-}
 
 function formatTime(dateString: string) {
   if (!dateString) return "--"

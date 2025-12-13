@@ -22,7 +22,7 @@ import {
   Wallet,
   Receipt
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, formatMoney, getTimeDiff } from "@/lib/utils"
 
 // UI Components
 import { Button } from "@/components/ui/button"
@@ -830,15 +830,6 @@ function StatusBadge({ status, mini }: { status: string, mini?: boolean }) {
     )
 }
 
-function getTimeDiff(dateStr: string | null) {
-  if(!dateStr) return "Just now"
-  const diff = Math.floor((new Date().getTime() - new Date(dateStr).getTime()) / 60000)
-  return diff < 1 ? "Just now" : `${diff}m ago`
-}
-
-function formatMoney(amount: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
-}
 
 function formatTime(dateString: string) {
   if (!dateString) return "--"
