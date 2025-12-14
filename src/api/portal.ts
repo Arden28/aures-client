@@ -77,6 +77,10 @@ export async function placePortalOrder(tableCode: string, sessionId: number | nu
   return fullSessionData.active_order as ActiveSessionData;
 }
 
+export async function closePortalSession(tableCode: string, sessionId: number) {
+  await apiService.post(`/v1/portal/${tableCode}/session/${sessionId}/close`)
+}
+
 // NOTE: updatePortalOrder is removed/merged into placePortalOrder for session logic
 
 // --- REAL-TIME SUBSCRIPTION ---

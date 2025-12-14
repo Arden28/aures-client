@@ -28,7 +28,8 @@ import {
   type TableSession,
   type ActiveSessionData,
   type OrderStatus,
-  type OrderItemStatus
+  type OrderItemStatus,
+  closePortalSession
 } from "@/api/portal"
 import { useSearchParams } from "react-router-dom"
 
@@ -327,11 +328,33 @@ export default function PortalPage() {
     }
   }
 
-  // Reset Logic
-  const handleNewOrder = () => {
-      if(window.confirm("Start a brand new order? This will clear the current view.")) {
-          setActiveSessionData(null)
-          setCart([])
+  // Helper to reset the frontend state for a fresh start
+  const resetLocalState = () => {
+      setActiveSessionData(null)
+      setCart([])
+      // Clear active session ID so the next order submission creates a FRESH session
+      setSession(prev => prev ? { 
+          ...prev, 
+          active_session_id: null, 
+          session_status: 'active' // Reset status so UI unlocks
+      } : null)
+  }
+
+  // Handle New Order (Resets for a fresh session)
+  const handleNewOrder = async () => {
+      if (session?.active_session_id && tableCode && session.session_status !== 'closed') {
+         if(window.confirm("Close current session and start fresh?")) {
+             try {
+                 await closePortalSession(tableCode, session.active_session_id)
+                 resetLocalState()
+                 toast.success("Session closed. Ready for new order!")
+             } catch(e) {
+                 toast.error("Failed to close session.")
+             }
+         }
+      } else {
+          // If session is already closed or didn't exist, just reset local state
+          resetLocalState()
           toast.success("Ready for a new order!")
       }
   }
