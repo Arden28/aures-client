@@ -435,7 +435,7 @@ export default function WaiterPage() {
               </TabsContent>
 
               <TabsContent value="tables" className="h-full mt-0 data-[state=inactive]:hidden">
-                    <div className="h-full pb-20"><FloorPlan setActiveTab={setActiveTab} /></div>
+                    <div className="h-full pb-20"><FloorPlan /></div>
               </TabsContent>
               <TabsContent value="orders" className="h-full mt-0 data-[state=inactive]:hidden">
                     <WaiterOrdersSection user={user} />

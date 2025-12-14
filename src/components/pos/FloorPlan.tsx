@@ -111,7 +111,7 @@ export function FloorPlan() {
                 fetchFloorPlans({ status: "active" }),
                 fetchTables(),
                 //  UPDATED: Fetch all orders that are NOT completed/cancelled
-                fetchOrders({ status: "pending,preparing,ready,served" }) 
+                fetchOrders() 
             ])
 
             setFloors(floorList)
