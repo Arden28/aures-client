@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion"
 import { 
   ShoppingBag, Minus, Plus, ChevronRight, ChevronLeft, Search, 
   Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt,
-  RotateCcw
+  RotateCcw, CreditCard, Clock
 } from "lucide-react"
 
 import { cn, formatMoney } from "@/lib/utils"
@@ -21,7 +21,8 @@ import { toast } from "sonner"
 import { 
   fetchPortalData,
   placePortalOrder,
-  subscribeToOrderUpdates,
+  closePortalSession,
+  subscribeToSessionOrders,
   type PortalCategory, 
   type PortalProduct, 
   type PortalCartItem,
@@ -29,7 +30,7 @@ import {
   type ActiveSessionData,
   type OrderStatus,
   type OrderItemStatus,
-  closePortalSession
+  type OrderSummary
 } from "@/api/portal"
 import { useSearchParams } from "react-router-dom"
 
@@ -50,12 +51,12 @@ export default function PortalPage() {
   const [products, setProducts] = React.useState<PortalProduct[]>([])
   const [activeCategory, setActiveCategory] = React.useState("popular")
   
-  // Cart State (Represents the "Proposed" or "Current" Session Items)
+  // Cart State (Unified View: History + New Items)
   const [cart, setCart] = React.useState<PortalCartItem[]>([])
   const [isCartOpen, setIsCartOpen] = React.useState(false)
   const [isOrdering, setIsOrdering] = React.useState(false)
   
-  // Active Session Tracking State
+  // Active Session State
   const [activeSessionData, setActiveSessionData] = React.useState<ActiveSessionData | null>(null)
   const [isTrackerOpen, setIsTrackerOpen] = React.useState(false)
 
@@ -76,13 +77,16 @@ export default function PortalPage() {
   const cartTotal = cart.reduce((acc, item) => acc + (item.product.price * item.quantity), 0)
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0)
   
-  // Helper to check if item is locked (already sent to kitchen)
-  const isLocked = (status?: string) => status && status !== 'pending';
+  // Logic to lock items that are already processing
+  // These items cannot be edited/removed from the cart
+  const isLocked = (status?: string) => {
+      return status && ['preparing', 'cooking', 'ready', 'served', 'completed'].includes(status);
+  };
 
   // Logic: Can only modify if session is NOT closed
   const canModifyOrder = session?.session_status !== 'closed';
   
-  // Check if paid (simplified for now based on session status)
+  // Check if paid (session closed)
   const isOrderPaid = session?.session_status === 'closed';
 
   // -- Init
@@ -101,11 +105,13 @@ export default function PortalPage() {
         setCategories(data.menu.categories)
         setProducts(data.menu.products)
         
-        // **HYDRATION MAGIC**
-        if (data.active_order) {
-            setActiveSessionData(data.active_order)
+        // Populate session data if exists
+        // Note: The controller returns 'active_session'
+        const sessionPayload = data.active_session || data.active_order;
+        if (sessionPayload) { 
+            setActiveSessionData(sessionPayload)
             // Load existing items into the cart view so they appear as "locked"
-            setCart(data.active_order.items)
+            setCart(sessionPayload.items)
         }
 
       } catch (e) {
@@ -118,55 +124,52 @@ export default function PortalPage() {
     load()
   }, [tableCode])
 
-  // -- Order Subscription Logic (REAL-TIME)
+  // -- Real-time Sub (Multi-Order)
   React.useEffect(() => {
-    // We need to subscribe to the LATEST order ID associated with this session items.
-    // This allows us to get updates on the most recently placed items.
-    if (activeSessionData && activeSessionData.items.length > 0 && session?.session_status !== 'closed') {
+    // We access the orders array from the session data
+    const orders = (activeSessionData as any)?.orders || [];
+
+    if (orders.length > 0 && session?.session_status !== 'closed') {
       
-      // Find the highest order_id in the items list
-      const latestOrderId = activeSessionData.items.reduce((max, item) => {
-          return item.order_id ? Math.max(max, item.order_id) : max;
-      }, 0);
-
-      if (latestOrderId > 0) {
-          const unsubscribe = subscribeToOrderUpdates(latestOrderId, {
-            
-            // 1. Handle Whole Order Status
-            onOrderStatus: (newStatus) => {
-                setActiveSessionData(prev => prev ? { ...prev, status: newStatus } : null)
-                if (newStatus === 'served') {
-                    toast.success("Items have been served!")
-                }
-            },
-
-            // 2. Handle Individual Item Status
-            onItemStatus: (itemId, newStatus) => {
-                // Update the Cart View
-                setCart(prev => prev.map(item => {
-                    if (item.order_item_id === itemId) {
-                        return { ...item, status: newStatus }
-                    }
-                    return item
-                }))
-
-                // Update the Session Data State
-                setActiveSessionData(prev => {
-                    if (!prev) return null;
-                    return {
-                        ...prev,
-                        items: prev.items.map(item => 
-                            item.order_item_id === itemId ? { ...item, status: newStatus } : item
-                        )
-                    }
-                })
+      const orderIds = orders.map((o: any) => o.id);
+      
+      const unsubscribe = subscribeToSessionOrders(orderIds, {
+        onOrderStatus: (orderId, newStatus) => {
+            // 1. Update the specific order in the session data
+            setActiveSessionData(prev => {
+                if (!prev) return null;
+                const prevOrders = (prev as any).orders || [];
+                const updatedOrders = prevOrders.map((o: any) => o.id === orderId ? { ...o, status: newStatus } : o);
+                return { ...prev, orders: updatedOrders } as ActiveSessionData;
+            })
+            if (newStatus === 'served') {
+                toast.success(`Order #${orderId} has been served!`)
             }
-          })
+        },
+        onItemStatus: (itemId, newStatus) => {
+            // 2. Update Cart View (so locks appear/disappear)
+            setCart(prev => prev.map(item => item.order_item_id === itemId ? { ...item, status: newStatus } : item))
+            
+            // 3. Update Session Data Deeply
+            setActiveSessionData(prev => {
+                if (!prev) return null;
+                // Update flattened items list
+                const updatedItems = prev.items.map(item => item.order_item_id === itemId ? { ...item, status: newStatus } : item);
+                
+                // Update nested orders list
+                const prevOrders = (prev as any).orders || [];
+                const updatedOrders = prevOrders.map((o: any) => ({
+                    ...o,
+                    items: o.items.map((i: any) => i.order_item_id === itemId ? { ...i, status: newStatus } : i)
+                }));
 
-          return () => unsubscribe()
-      }
+                return { ...prev, items: updatedItems, orders: updatedOrders } as ActiveSessionData;
+            })
+        }
+      })
+      return () => unsubscribe()
     }
-  }, [activeSessionData?.session_id, activeSessionData?.items, session?.session_status])
+  }, [activeSessionData?.session_id, (activeSessionData as any)?.orders?.length, session?.session_status])
 
   // -- Category Scroll Logic
   const checkScroll = () => {
@@ -209,7 +212,7 @@ export default function PortalPage() {
     }
 
     setCart(prev => {
-      // Check if item exists (matching ID, notes, and is pending)
+      // Find matching item only if it's pending. Different notes = different item.
       const existingIndex = prev.findIndex(i => 
         i.product.id === selectedProduct.id && 
         i.notes === tempNotes && 
@@ -246,8 +249,8 @@ export default function PortalPage() {
       const item = cart[itemIndex]
       
       if (isLocked(item.status)) {
-          toast.error("Cannot remove items that are preparing.")
-          return 
+        toast.error("Cannot remove items that are being prepared or served.")
+        return 
       }
       
       setCart(prev => prev.filter((_, i) => i !== itemIndex))
@@ -257,7 +260,7 @@ export default function PortalPage() {
       const item = cart[itemIndex]
       
       if (isLocked(item.status)) {
-           toast.error("Item is already preparing.")
+           toast.error("Item is already preparing/served.")
            return 
       }
 
@@ -279,6 +282,7 @@ export default function PortalPage() {
     const item = cart[itemIndex]
     
     if (isLocked(item.status)) {
+         toast.error("This item is processing. Add a new one instead.")
          return 
     }
 
@@ -326,6 +330,21 @@ export default function PortalPage() {
     } finally {
       setIsOrdering(false)
     }
+  }
+
+  const handlePayment = async () => {
+      if (!session?.active_session_id || !tableCode) return;
+      
+      const confirmPayment = window.confirm(`Finalize session and pay ${formatMoney(activeSessionData?.total_due || 0, currency)}?`);
+      if(!confirmPayment) return;
+
+      try {
+          await closePortalSession(tableCode, session.active_session_id)
+          setSession(prev => prev ? { ...prev, session_status: 'closed' } : null)
+          toast.success("Payment successful! Session closed.")
+      } catch (e) {
+          toast.error("Payment failed. Please try again.")
+      }
   }
 
   // Helper to reset the frontend state for a fresh start
@@ -399,7 +418,7 @@ export default function PortalPage() {
                 activeSessionData.status === 'served' ? "bg-indigo-100 text-indigo-700" : "bg-green-100 text-green-700"
             )}>
                 <div className={cn("h-2 w-2 rounded-full animate-pulse", activeSessionData.status === 'served' ? "bg-indigo-500" : "bg-green-500")} />
-                {activeSessionData.status === 'served' ? "All Items Served" : "Tab Open"}
+                {activeSessionData.status === 'served' ? "Service Complete" : "Tab Active"}
             </div>
         )}
       </div>
@@ -536,7 +555,7 @@ export default function PortalPage() {
 
       {/* 5. Active Session Tracker Pill */}
       <AnimatePresence>
-        {activeSessionData && !isTrackerOpen && (
+        {activeSessionData && !isTrackerOpen && !isOrderPaid && (
           <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -581,6 +600,18 @@ export default function PortalPage() {
               </Button>
             </div>
           </motion.div>
+        )}
+
+        {/* Scenario B: Served & Unpaid -> Show Pay Button */}
+        {!canModifyOrder && !isOrderPaid && !isTrackerOpen && activeSessionData && (
+           <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="fixed bottom-6 left-0 right-0 z-50 px-4 pointer-events-none">
+             <div className="max-w-md mx-auto pointer-events-auto">
+               <Button size="lg" onClick={handlePayment} className="w-full h-16 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl hover:scale-[1.02] transition-all flex items-center justify-between px-6 border-2 border-white/10">
+                 <div className="flex items-center gap-3"><div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20"><CreditCard className="h-5 w-5"/></div><div className="flex flex-col items-start text-xs"><span className="font-bold text-base">Pay Bill</span><span className="opacity-90 font-normal">Secure Checkout</span></div></div>
+                 <span className="font-bold text-xl">{formatMoney(activeSessionData.total_due, currency)}</span>
+               </Button>
+             </div>
+           </motion.div>
         )}
 
         {/* Scenario C: Paid -> Show New Order Button */}
@@ -794,184 +825,130 @@ export default function PortalPage() {
 
 function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: boolean, onClose: () => void, sessionData: ActiveSessionData | null, currency: string }) {
     if (!sessionData) return null
-  
-    // Status mapping for visual timeline
-    const steps: { id: OrderStatus, label: string, icon: React.ReactNode }[] = [
-      { id: 'pending', label: 'Received', icon: <Receipt className="h-4 w-4" /> },
-      { id: 'preparing', label: 'Preparing', icon: <ChefHat className="h-4 w-4" /> },
-      { id: 'ready', label: 'On Way', icon: <Utensils className="h-4 w-4" /> },
-      { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-4 w-4" /> },
-    ]
-  
-    const currentStepIndex = steps.findIndex(s => s.id === sessionData.status)
-    const orderTotal = sessionData.total_due // Use the aggregated session total
-  
+    // We expect sessionData to have an 'orders' array based on the updated controller logic
+    const orders = (sessionData as any).orders || [];
+
     return (
       <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
         <DrawerContent className="max-w-lg mx-auto h-[90vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
           
           {/* Header */}
           <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-between px-6 pt-6">
-             <div className="text-left">
-               <DrawerTitle className="text-2xl font-bold flex items-center gap-2">
-                 Session Status
-                 <span className="flex h-2.5 w-2.5 relative">
-                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                 </span>
-               </DrawerTitle>
-               <p className="text-sm text-muted-foreground font-medium mt-1">Session #{sessionData.session_id}</p>
-             </div>
-             <DrawerClose asChild>
-                <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 hover:bg-muted">
-                  <X className="h-5 w-5" />
-                </Button>
-            </DrawerClose>
-          </DrawerHeader>
-  
-          {/* Content - Scrollable */}
-          <div className="flex-1 overflow-y-auto bg-muted/5">
-              <div className="p-6 space-y-8">
-                  
-                  {/* 1. Status Pulse */}
-                  <div className="flex justify-center py-4">
-                      <div className="relative">
-                         <div className={cn(
-                           "h-40 w-40 rounded-full flex flex-col items-center justify-center border-4 shadow-xl transition-all duration-700",
-                           sessionData.status === 'served' 
-                             ? "bg-green-50 border-green-200 text-green-700" 
-                             : "bg-background border-primary/10 text-foreground"
-                         )}>
-                            {sessionData.status === 'served' ? (
-                               <>
-                                 <CheckCircle2 className="h-10 w-10 mb-2 text-green-600" />
-                                 <span className="font-bold text-lg">Completed</span>
-                               </>
-                            ) : (
-                               <>
-                                 <div className="text-4xl font-black tabular-nums tracking-tighter">
-                                   {sessionData.estimatedTime.split(' ')[0]}
-                                 </div>
-                                 <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground mt-1">Minutes</span>
-                                 <span className="text-[10px] text-muted-foreground/60 font-medium mt-2 bg-muted px-2 py-0.5 rounded-full">ESTIMATED</span>
-                               </>
-                            )}
-                         </div>
-                         {sessionData.status !== 'served' && (
-                           <div className="absolute inset-0 rounded-full border-4 border-primary/20 animate-ping opacity-30 duration-1000" />
-                         )}
-                      </div>
-                  </div>
-  
-                  {/* 2. Timeline Steps */}
-                  <div className="bg-card rounded-2xl border border-border/50 p-6 shadow-sm">
-                      <div className="flex justify-between items-start relative">
-                          {/* Connecting Line */}
-                          <div className="absolute top-4 left-0 right-0 h-0.5 bg-muted -z-0 mx-4" />
-                          
-                          {steps.map((step, idx) => {
-                               const isCompleted = idx <= currentStepIndex
-                               const isCurrent = idx === currentStepIndex
-                               return (
-                                  <div key={step.id} className="flex flex-col items-center gap-2 relative z-10">
-                                      <div className={cn(
-                                         "h-9 w-9 rounded-full flex items-center justify-center border-2 transition-all duration-500",
-                                         isCompleted 
-                                           ? "bg-primary border-primary text-primary-foreground shadow-md" 
-                                           : "bg-card border-border text-muted-foreground"
-                                      )}>
-                                          {step.icon}
-                                      </div>
-                                      <span className={cn(
-                                         "text-[10px] font-bold uppercase tracking-wider transition-colors",
-                                         isCurrent ? "text-primary" : "text-muted-foreground"
-                                      )}>
-                                          {step.label}
-                                      </span>
-                                  </div>
-                               )
-                          })}
-                      </div>
-                  </div>
-  
-                  {/* 3. Order Receipt */}
-                  <div className="space-y-3">
-                      <h3 className="font-semibold flex items-center gap-2 ml-1">
-                          <Receipt className="h-4 w-4 text-primary" />
-                          Session Summary
-                      </h3>
-                      <div className="bg-card rounded-2xl border border-border/50 overflow-hidden shadow-sm">
-                          {/* Receipt Header */}
-                          <div className="bg-muted/30 p-4 border-b border-dashed border-border flex justify-between items-center text-xs text-muted-foreground font-medium uppercase tracking-wider">
-                             <span>Item</span>
-                             <span>Price</span>
-                          </div>
-                          {/* Receipt Items */}
-                          <div className="p-4 space-y-4">
-                             {sessionData.items.map((item, idx) => (
-                                 <div key={idx} className="flex justify-between items-start gap-4">
-                                     <div className="flex gap-3">
-                                         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[10px] font-bold shrink-0">
-                                            {item.quantity}x
-                                         </div>
-                                         <div className="space-y-1">
-                                             <span className="text-sm font-semibold leading-none block">{item.product.name}</span>
-                                             {item.notes && (
-                                                <p className="text-xs text-muted-foreground italic">Note: {item.notes}</p>
-                                             )}
-                                         </div>
-                                     </div>
-                                     <span className="text-sm font-medium tabular-nums">
-                                        {formatMoney(item.product.price * item.quantity, currency)}
-                                     </span>
-                                 </div>
-                             ))}
-                          </div>
-                          {/* Receipt Total */}
-                          <div className="bg-muted/30 p-4 border-t border-dashed border-border flex justify-between items-center">
-                             <span className="text-sm font-bold">Total Due</span>
-                             <span className="text-lg font-bold text-primary">{formatMoney(orderTotal, currency)}</span>
-                          </div>
-                      </div>
-                  </div>
-  
+              <div className="text-left">
+                <DrawerTitle className="text-2xl font-bold flex items-center gap-2">
+                  Session Status
+                  <span className="flex h-2.5 w-2.5 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                </DrawerTitle>
+                <p className="text-sm text-muted-foreground font-medium mt-1">Session #{sessionData.session_id}</p>
               </div>
+              <DrawerClose asChild>
+                 <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 hover:bg-muted">
+                   <X className="h-5 w-5" />
+                 </Button>
+             </DrawerClose>
+          </DrawerHeader>
+          
+          <div className="flex-1 overflow-y-auto bg-muted/10 p-6 space-y-6">
+             {/* Render a tracker card for EACH order in the session */}
+             {orders.length > 0 ? (
+                 orders.map((order: any) => (
+                     <OrderTrackerCard key={order.id} order={order} currency={currency} />
+                 ))
+             ) : (
+                 <div className="text-center text-muted-foreground p-4">No active orders yet.</div>
+             )}
+             
+             <div className="border-t pt-4 mt-8">
+                 <div className="flex justify-between text-xl font-bold"><span>Total Due</span><span>{formatMoney(sessionData.total_due, currency)}</span></div>
+             </div>
           </div>
-  
-          {/* Footer Actions */}
-          <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
+          
+           {/* Footer Actions */}
+           <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
              <Button 
                className="w-full h-14 text-lg font-bold rounded-xl shadow-lg text-white shadow-primary/10" 
-               variant={sessionData.status === 'served' ? "default" : "secondary"}
+               variant="default" // Always default since it's just closing the tracker view
                onClick={onClose}
              >
-               {sessionData.status === 'served' ? "Close Tracker" : "Browse Menu"}
+               Back to Menu
              </Button>
           </div>
-  
+
         </DrawerContent>
       </Drawer>
     )
-  }
-  
-  function PortalSkeleton() {
+}
+
+function OrderTrackerCard({ order, currency }: { order: OrderSummary, currency: string }) {
+    const steps = [
+        { id: 'pending', label: 'Received' }, 
+        { id: 'preparing', label: 'Cooking' }, 
+        { id: 'ready', label: 'Ready' }, 
+        { id: 'served', label: 'Served' }
+    ]
+    // Completed status counts as served for the tracker
+    const statusToCheck = order.status === 'completed' ? 'served' : order.status;
+    const currentIdx = steps.findIndex(s => s.id === statusToCheck);
+    
     return (
-      <div className="p-6 space-y-8 max-w-5xl mx-auto">
-        <div className="space-y-3">
-          <Skeleton className="h-10 w-1/3" />
-          <Skeleton className="h-5 w-1/4" />
+        <div className="bg-card rounded-xl border shadow-sm p-4 space-y-4">
+            <div className="flex justify-between items-center">
+                <h3 className="font-bold">Order #{order.id}</h3>
+                <span className={cn("px-2 py-1 rounded-full text-xs font-bold uppercase", order.status === 'served' || order.status === 'completed' ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700")}>
+                    {order.status}
+                </span>
+            </div>
+            
+            {/* Mini Stepper */}
+            <div className="flex justify-between items-center relative px-2">
+                <div className="absolute top-[14px] left-0 right-0 h-0.5 bg-muted -z-0" />
+                {steps.map((step, i) => {
+                    const completed = i <= currentIdx;
+                    return (
+                        <div key={step.id} className="relative z-10 flex flex-col items-center gap-1">
+                            <div className={cn("h-7 w-7 rounded-full flex items-center justify-center border-2 bg-card transition-colors", completed ? "border-primary text-primary" : "border-muted text-muted-foreground")}>
+                                {completed && <div className="h-2.5 w-2.5 rounded-full bg-primary" />}
+                            </div>
+                            <span className={cn("text-[9px] font-bold uppercase", completed ? "text-primary" : "text-muted-foreground")}>{step.label}</span>
+                        </div>
+                    )
+                })}
+            </div>
+
+            {/* Items List */}
+            <div className="space-y-2 pt-2 border-t border-dashed">
+                {order.items.map((item: any, idx: number) => (
+                    <div key={idx} className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">{item.quantity}x {item.product.name}</span>
+                        <span>{formatMoney(item.quantity * item.product.price, currency)}</span>
+                    </div>
+                ))}
+            </div>
         </div>
-        <div className="flex gap-3 overflow-hidden">
-          <Skeleton className="h-10 w-28 rounded-full" />
-          <Skeleton className="h-10 w-28 rounded-full" />
-          <Skeleton className="h-10 w-28 rounded-full" />
-          <Skeleton className="h-10 w-28 rounded-full" />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1,2,3,4,5,6].map(i => (
-             <Skeleton key={i} className="h-64 w-full rounded-3xl" />
-          ))}
-        </div>
-      </div>
     )
-  }
+}
+
+function PortalSkeleton() { 
+  return (
+    <div className="p-6 space-y-8 max-w-5xl mx-auto">
+      <div className="space-y-3">
+        <Skeleton className="h-10 w-1/3" />
+        <Skeleton className="h-5 w-1/4" />
+      </div>
+      <div className="flex gap-3 overflow-hidden">
+        <Skeleton className="h-10 w-28 rounded-full" />
+        <Skeleton className="h-10 w-28 rounded-full" />
+        <Skeleton className="h-10 w-28 rounded-full" />
+        <Skeleton className="h-10 w-28 rounded-full" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[1,2,3,4,5,6].map(i => (
+           <Skeleton key={i} className="h-64 w-full rounded-3xl" />
+        ))}
+      </div>
+    </div>
+  ) 
+}

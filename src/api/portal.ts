@@ -35,11 +35,22 @@ export type PortalCartItem = {
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'completed' | 'cancelled'
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'refunded'
 
+// Single Order Summary (used in the tracker list)
+export type OrderSummary = {
+    id: number
+    status: OrderStatus
+    items: PortalCartItem[]
+    total: number
+    timestamp: number
+    estimatedTime: string
+}
+
 // Aggregated Data for the entire Session
 export type ActiveSessionData = {
   session_id: number // The ID of the TableSession
   status: OrderStatus // The status of the latest order (or aggregate status)
   items: PortalCartItem[] // AGGREGATED list of items from all session orders
+  orders: OrderSummary[] // NEW: List of distinct orders (for the Tracker view)
   total_due: number // Sum of all orders in the session
   estimatedTime: string
   timestamp: number
@@ -86,31 +97,32 @@ export async function closePortalSession(tableCode: string, sessionId: number) {
 // --- REAL-TIME SUBSCRIPTION ---
 
 type RealtimeCallbacks = {
-    onOrderStatus: (newStatus: OrderStatus) => void;
+    onOrderStatus: (orderId: number, newStatus: OrderStatus) => void;
     onItemStatus: (itemId: number, newStatus: OrderItemStatus) => void;
 }
 
-export function subscribeToOrderUpdates(orderId: number, callbacks: RealtimeCallbacks) {
-  if (!echo) return () => {};
+// Subscribe to MULTIPLE orders
+export function subscribeToSessionOrders(orderIds: number[], callbacks: RealtimeCallbacks) {
+  if (!echo || orderIds.length === 0) return () => {};
 
-  // Subscribe to the specific order channel
-  const channel = echo.channel(`order.${orderId}`);
+  const channels: any[] = [];
 
-  channel.listen('.order.status.updated', (e: any) => {
-      if (e.new_status) {
-          callbacks.onOrderStatus(e.new_status as OrderStatus);
-      }
-  });
+  orderIds.forEach(id => {
+      const channel = echo.channel(`order.${id}`);
+      channels.push(channel);
 
-  channel.listen('.order.item.status.updated', (e: any) => {
-      if (e.item_id && e.new_status) {
-          callbacks.onItemStatus(e.item_id, e.new_status as OrderItemStatus);
-      }
+      channel.listen('.order.status.updated', (e: any) => {
+          if (e.new_status) callbacks.onOrderStatus(id, e.new_status as OrderStatus);
+      });
+
+      channel.listen('.order.item.status.updated', (e: any) => {
+          if (e.item_id && e.new_status) callbacks.onItemStatus(e.item_id, e.new_status as OrderItemStatus);
+      });
   });
 
   return () => {
-      channel.stopListening('.order.status.updated');
-      channel.stopListening('.order.item.status.updated');
-      echo.leave(`order.${orderId}`);
+      orderIds.forEach(id => {
+          echo.leave(`order.${id}`);
+      });
   };
 }
