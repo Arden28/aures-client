@@ -823,16 +823,26 @@ export default function PortalPage() {
 
 /* -------------------------- Sub-components -------------------------- */
 
+
 function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: boolean, onClose: () => void, sessionData: ActiveSessionData | null, currency: string }) {
     if (!sessionData) return null
-    // We expect sessionData to have an 'orders' array based on the updated controller logic
-    const orders = (sessionData as any).orders || [];
+    // Fallback logic: If 'orders' array is empty (backend issue) but 'items' exist, create a virtual order
+    let orders = (sessionData as any).orders || [];
+    
+    if (orders.length === 0 && sessionData.items.length > 0) {
+        orders = [{
+            id: sessionData.session_id, // Use session ID as proxy
+            status: sessionData.status,
+            items: sessionData.items,
+            total: sessionData.total_due,
+            estimatedTime: sessionData.estimatedTime,
+            timestamp: sessionData.timestamp
+        }];
+    }
 
     return (
       <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
-        <DrawerContent className="max-w-lg mx-auto h-[90vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
-          
-          {/* Header */}
+        <DrawerContent className="max-w-lg mx-auto h-[90vh] rounded-t-[2rem]">
           <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-between px-6 pt-6">
               <div className="text-left">
                 <DrawerTitle className="text-2xl font-bold flex items-center gap-2">
@@ -858,7 +868,7 @@ function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: 
                      <OrderTrackerCard key={order.id} order={order} currency={currency} />
                  ))
              ) : (
-                 <div className="text-center text-muted-foreground p-4">No active orders yet.</div>
+                 <div className="text-center text-muted-foreground p-4">No active orders found.</div>
              )}
              
              <div className="border-t pt-4 mt-8">
@@ -870,7 +880,7 @@ function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: 
            <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
              <Button 
                className="w-full h-14 text-lg font-bold rounded-xl shadow-lg text-white shadow-primary/10" 
-               variant="default" // Always default since it's just closing the tracker view
+               variant="default" 
                onClick={onClose}
              >
                Back to Menu
@@ -884,48 +894,135 @@ function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: 
 
 function OrderTrackerCard({ order, currency }: { order: OrderSummary, currency: string }) {
     const steps = [
-        { id: 'pending', label: 'Received' }, 
-        { id: 'preparing', label: 'Cooking' }, 
-        { id: 'ready', label: 'Ready' }, 
-        { id: 'served', label: 'Served' }
+        { id: 'pending', label: 'Received', icon: <Receipt className="h-3.5 w-3.5" /> }, 
+        { id: 'preparing', label: 'Cooking', icon: <ChefHat className="h-3.5 w-3.5" /> }, 
+        { id: 'ready', label: 'Ready', icon: <BellRing className="h-3.5 w-3.5" /> }, 
+        { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-3.5 w-3.5" /> }
     ]
-    // Completed status counts as served for the tracker
+    
+    // Normalize status: 'completed' is visually the same as 'served' here
     const statusToCheck = order.status === 'completed' ? 'served' : order.status;
     const currentIdx = steps.findIndex(s => s.id === statusToCheck);
-    
+    // Safety check if status isn't found (e.g. cancelled), default to 0
+    const safeIdx = currentIdx === -1 ? 0 : currentIdx;
+
     return (
-        <div className="bg-card rounded-xl border shadow-sm p-4 space-y-4">
-            <div className="flex justify-between items-center">
-                <h3 className="font-bold">Order #{order.id}</h3>
-                <span className={cn("px-2 py-1 rounded-full text-xs font-bold uppercase", order.status === 'served' || order.status === 'completed' ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700")}>
-                    {order.status}
-                </span>
-            </div>
+        <div className="flex flex-col gap-6 py-6 first:pt-2 border-b border-border/40 last:border-0">
             
-            {/* Mini Stepper */}
-            <div className="flex justify-between items-center relative px-2">
-                <div className="absolute top-[14px] left-0 right-0 h-0.5 bg-muted -z-0" />
-                {steps.map((step, i) => {
-                    const completed = i <= currentIdx;
-                    return (
-                        <div key={step.id} className="relative z-10 flex flex-col items-center gap-1">
-                            <div className={cn("h-7 w-7 rounded-full flex items-center justify-center border-2 bg-card transition-colors", completed ? "border-primary text-primary" : "border-muted text-muted-foreground")}>
-                                {completed && <div className="h-2.5 w-2.5 rounded-full bg-primary" />}
-                            </div>
-                            <span className={cn("text-[9px] font-bold uppercase", completed ? "text-primary" : "text-muted-foreground")}>{step.label}</span>
-                        </div>
-                    )
-                })}
+            {/* Header Section */}
+            <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-lg tracking-tight">Order #{order.id}</h3>
+                        <span className="text-xs text-muted-foreground font-medium bg-muted/50 px-2 py-0.5 rounded-md">
+                            {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                        {order.items.length} {order.items.length === 1 ? 'item' : 'items'}
+                    </p>
+                </div>
+                
+                {/* Status Badge - Minimalist */}
+                <div className={cn(
+                    "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5",
+                    order.status === 'served' || order.status === 'completed'
+                        ? "bg-primary/10 text-primary" // Use App Primary for Success
+                        : "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+                )}>
+                    <div className={cn(
+                        "h-1.5 w-1.5 rounded-full", 
+                        order.status === 'served' || order.status === 'completed' ? "bg-primary" : "bg-orange-500 animate-pulse"
+                    )} />
+                    {order.status}
+                </div>
             </div>
 
-            {/* Items List */}
-            <div className="space-y-2 pt-2 border-t border-dashed">
+            {/* Modern Stepper */}
+            <div className="relative">
+                {/* Background Track */}
+                <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-muted -translate-y-1/2 rounded-full" />
+                
+                {/* Active Progress Track */}
+                <motion.div 
+                    className="absolute top-1/2 left-0 h-0.5 bg-primary -translate-y-1/2 rounded-full origin-left"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(safeIdx / (steps.length - 1)) * 100}%` }}
+                    transition={{ duration: 0.8, ease: "circOut" }}
+                />
+
+                <div className="relative flex justify-between w-full">
+                    {steps.map((step, i) => {
+                        const isCompleted = i <= safeIdx;
+                        const isCurrent = i === safeIdx;
+
+                        return (
+                            <div key={step.id} className="flex flex-col items-center gap-2">
+                                <motion.div 
+                                    initial={false}
+                                    animate={{ 
+                                        backgroundColor: isCompleted ? "hsl(var(--primary))" : "hsl(var(--background))",
+                                        borderColor: isCompleted ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                                        scale: isCurrent ? 1.1 : 1
+                                    }}
+                                    className={cn(
+                                        "h-8 w-8 rounded-full border-2 flex items-center justify-center z-10 transition-colors duration-300",
+                                        // Text color logic
+                                        isCompleted ? "text-primary-foreground" : "text-muted-foreground"
+                                    )}
+                                >
+                                    {/* Icon */}
+                                    <div className="scale-75">
+                                        {step.icon}
+                                    </div>
+                                </motion.div>
+                                
+                                {/* Label */}
+                                <span className={cn(
+                                    "absolute top-10 text-[10px] font-semibold uppercase tracking-wide transition-colors duration-300 w-20 text-center",
+                                    isCurrent ? "text-foreground font-bold" : "text-muted-foreground/60"
+                                )}>
+                                    {step.label}
+                                </span>
+                            </div>
+                        )
+                    })}
+                </div>
+            </div>
+
+            {/* Spacer for stepper labels */}
+            <div className="h-2" />
+
+            {/* Items List - Clean & Notion-like */}
+            <div className="bg-muted/30 rounded-lg p-4 space-y-3">
                 {order.items.map((item: any, idx: number) => (
-                    <div key={idx} className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">{item.quantity}x {item.product.name}</span>
-                        <span>{formatMoney(item.quantity * item.product.price, currency)}</span>
+                    <div key={idx} className="flex justify-between items-start text-sm">
+                        <div className="flex gap-3 items-start">
+                            <span className="font-mono text-muted-foreground text-xs pt-0.5">{item.quantity}x</span>
+                            <div className="flex flex-col">
+                                <span className="font-medium text-foreground">{item.product.name}</span>
+                                {item.notes && (
+                                    <span className="text-[10px] text-muted-foreground italic mt-0.5 flex items-center gap-1">
+                                        <span className="w-1 h-1 rounded-full bg-orange-400/50" />
+                                        {item.notes}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                        <span className="font-mono text-muted-foreground text-xs">
+                            {formatMoney(item.quantity * item.product.price, currency)}
+                        </span>
                     </div>
                 ))}
+                
+                {/* Dashed Separator */}
+                <div className="border-t border-dashed border-border/50 my-2" />
+                
+                {/* Subtotal Row */}
+                <div className="flex justify-between items-center pt-1">
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Subtotal</span>
+                    <span className="font-bold text-base text-foreground">{formatMoney(order.total, currency)}</span>
+                </div>
             </div>
         </div>
     )
