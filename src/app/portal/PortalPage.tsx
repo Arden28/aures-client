@@ -4,8 +4,8 @@ import * as React from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { 
   ShoppingBag, Minus, Plus, ChevronRight, ChevronLeft, Search, 
-  Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt, Lock,
-  CreditCard, RotateCcw
+  Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt,
+  RotateCcw
 } from "lucide-react"
 
 import { cn, formatMoney } from "@/lib/utils"
@@ -21,13 +21,12 @@ import { toast } from "sonner"
 import { 
   fetchPortalData,
   placePortalOrder,
-  updatePortalOrder,
   subscribeToOrderUpdates,
   type PortalCategory, 
   type PortalProduct, 
   type PortalCartItem,
   type TableSession,
-  type ActiveOrder,
+  type ActiveSessionData,
   type OrderStatus,
   type OrderItemStatus
 } from "@/api/portal"
@@ -50,13 +49,13 @@ export default function PortalPage() {
   const [products, setProducts] = React.useState<PortalProduct[]>([])
   const [activeCategory, setActiveCategory] = React.useState("popular")
   
-  // Cart State (Represents the "Proposed" or "Current" Order state)
+  // Cart State (Represents the "Proposed" or "Current" Session Items)
   const [cart, setCart] = React.useState<PortalCartItem[]>([])
   const [isCartOpen, setIsCartOpen] = React.useState(false)
   const [isOrdering, setIsOrdering] = React.useState(false)
   
-  // Active Order Tracking State
-  const [activeOrder, setActiveOrder] = React.useState<ActiveOrder | null>(null)
+  // Active Session Tracking State
+  const [activeSessionData, setActiveSessionData] = React.useState<ActiveSessionData | null>(null)
   const [isTrackerOpen, setIsTrackerOpen] = React.useState(false)
 
   // Product Detail Modal State
@@ -71,15 +70,19 @@ export default function PortalPage() {
 
   // -- Derived
   const currency = session?.currency || "USD"
+  
+  // Total logic: Sum of items currently in the frontend cart/view
   const cartTotal = cart.reduce((acc, item) => acc + (item.product.price * item.quantity), 0)
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0)
   
   // Helper to check if item is locked (already sent to kitchen)
   const isLocked = (status?: string) => status && status !== 'pending';
 
-  // Logic: Can only modify if NOT served/completed/cancelled
-  const canModifyOrder = !activeOrder || (activeOrder.status !== 'served' && activeOrder.status !== 'completed' && activeOrder.status !== 'cancelled');
-  const isOrderPaid = activeOrder?.payment_status === 'paid';
+  // Logic: Can only modify if session is NOT closed
+  const canModifyOrder = session?.session_status !== 'closed';
+  
+  // Check if paid (simplified for now based on session status)
+  const isOrderPaid = session?.session_status === 'closed';
 
   // -- Init
   React.useEffect(() => {
@@ -99,7 +102,8 @@ export default function PortalPage() {
         
         // **HYDRATION MAGIC**
         if (data.active_order) {
-            setActiveOrder(data.active_order)
+            setActiveSessionData(data.active_order)
+            // Load existing items into the cart view so they appear as "locked"
             setCart(data.active_order.items)
         }
 
@@ -115,44 +119,53 @@ export default function PortalPage() {
 
   // -- Order Subscription Logic (REAL-TIME)
   React.useEffect(() => {
-    if (activeOrder && activeOrder.status !== 'completed') {
+    // We need to subscribe to the LATEST order ID associated with this session items.
+    // This allows us to get updates on the most recently placed items.
+    if (activeSessionData && activeSessionData.items.length > 0 && session?.session_status !== 'closed') {
       
-      const unsubscribe = subscribeToOrderUpdates(activeOrder.id, {
-        
-        // 1. Handle Whole Order Status (e.g. Pending -> Ready)
-        onOrderStatus: (newStatus) => {
-            setActiveOrder(prev => prev ? { ...prev, status: newStatus } : null)
-            if (newStatus === 'served') {
-                toast.success("Your order has been served! Enjoy your meal.")
+      // Find the highest order_id in the items list
+      const latestOrderId = activeSessionData.items.reduce((max, item) => {
+          return item.order_id ? Math.max(max, item.order_id) : max;
+      }, 0);
+
+      if (latestOrderId > 0) {
+          const unsubscribe = subscribeToOrderUpdates(latestOrderId, {
+            
+            // 1. Handle Whole Order Status
+            onOrderStatus: (newStatus) => {
+                setActiveSessionData(prev => prev ? { ...prev, status: newStatus } : null)
+                if (newStatus === 'served') {
+                    toast.success("Items have been served!")
+                }
+            },
+
+            // 2. Handle Individual Item Status
+            onItemStatus: (itemId, newStatus) => {
+                // Update the Cart View
+                setCart(prev => prev.map(item => {
+                    if (item.order_item_id === itemId) {
+                        return { ...item, status: newStatus }
+                    }
+                    return item
+                }))
+
+                // Update the Session Data State
+                setActiveSessionData(prev => {
+                    if (!prev) return null;
+                    return {
+                        ...prev,
+                        items: prev.items.map(item => 
+                            item.order_item_id === itemId ? { ...item, status: newStatus } : item
+                        )
+                    }
+                })
             }
-        },
+          })
 
-        // 2. Handle Individual Item Status (e.g. Pending -> Cooking)
-        onItemStatus: (itemId, newStatus) => {
-            // Update the Cart State to reflect the new status (This triggers the Lock UI)
-            setCart(prev => prev.map(item => {
-                if (item.order_item_id === itemId) {
-                    return { ...item, status: newStatus }
-                }
-                return item
-            }))
-
-            // Also update ActiveOrder state to keep them in sync
-            setActiveOrder(prev => {
-                if (!prev) return null;
-                return {
-                    ...prev,
-                    items: prev.items.map(item => 
-                        item.order_item_id === itemId ? { ...item, status: newStatus } : item
-                    )
-                }
-            })
-        }
-      })
-
-      return () => unsubscribe()
+          return () => unsubscribe()
+      }
     }
-  }, [activeOrder?.id, activeOrder?.status])
+  }, [activeSessionData?.session_id, activeSessionData?.items, session?.session_status])
 
   // -- Category Scroll Logic
   const checkScroll = () => {
@@ -188,9 +201,9 @@ export default function PortalPage() {
   const handleAddToCart = () => {
     if (!selectedProduct) return
     
-    // Guard: Prevent adding to completed order
+    // Guard
     if (!canModifyOrder) {
-        toast.error("This order is closed. Please ask for the bill or start a new order.")
+        toast.error("This session is closed. Please ask for the bill or start a new table.")
         return
     }
 
@@ -250,7 +263,6 @@ export default function PortalPage() {
       if (item.quantity > 1) {
           setCart(prev => {
               const newCart = [...prev]
-              // IMMUTABLE UPDATE
               newCart[itemIndex] = { 
                   ...newCart[itemIndex], 
                   quantity: newCart[itemIndex].quantity - 1 
@@ -271,7 +283,6 @@ export default function PortalPage() {
 
     setCart(prev => {
         const newCart = [...prev]
-        // IMMUTABLE UPDATE
         newCart[itemIndex] = { 
             ...newCart[itemIndex], 
             quantity: newCart[itemIndex].quantity + 1 
@@ -284,19 +295,27 @@ export default function PortalPage() {
     if (!session || !tableCode) return
     setIsOrdering(true)
     try {
-      let result: ActiveOrder;
-
-      if (activeOrder) {
-          // UPDATE MODE
-          result = await updatePortalOrder(tableCode, activeOrder.id, cart)
-          toast.success("Order updated successfully!")
-      } else {
-          // CREATE MODE
-          result = await placePortalOrder(tableCode, cart)
-          toast.success("Order placed successfully!")
+      // 1. Submit the cart. We pass the active_session_id to link it.
+      // The API returns the aggregated session data.
+      const result: ActiveSessionData = await placePortalOrder(
+          tableCode, 
+          session.active_session_id, 
+          cart
+      )
+      
+      // 2. Update local state with the aggregated result
+      setActiveSessionData(result)
+      
+      // 3. Update the cart to match the server state (this adds order_item_ids to new items)
+      setCart(result.items)
+      
+      // 4. Update the session state (in case we just created a new one)
+      if (!session.active_session_id) {
+          setSession(prev => prev ? { ...prev, active_session_id: result.session_id } : null)
       }
 
-      setActiveOrder(result)
+      toast.success(session.active_session_id ? "Order updated successfully!" : "Order placed successfully!")
+      
       setIsCartOpen(false)
       setIsTrackerOpen(true)
 
@@ -308,17 +327,10 @@ export default function PortalPage() {
     }
   }
 
-  // Payment Stub
-  const handlePayment = () => {
-      toast("Redirecting to secure payment...", {
-          description: "Feature stub: This would open Stripe/PayPal."
-      })
-  }
-
   // Reset Logic
   const handleNewOrder = () => {
       if(window.confirm("Start a brand new order? This will clear the current view.")) {
-          setActiveOrder(null)
+          setActiveSessionData(null)
           setCart([])
           toast.success("Ready for a new order!")
       }
@@ -358,13 +370,13 @@ export default function PortalPage() {
           You are seated at <span className="font-medium text-foreground">{session?.table_name}</span>. 
           Ready to order?
         </p>
-        {activeOrder && (
+        {activeSessionData && (
             <div className={cn(
                 "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mt-2",
-                activeOrder.status === 'served' ? "bg-indigo-100 text-indigo-700" : "bg-green-100 text-green-700"
+                activeSessionData.status === 'served' ? "bg-indigo-100 text-indigo-700" : "bg-green-100 text-green-700"
             )}>
-                <div className={cn("h-2 w-2 rounded-full animate-pulse", activeOrder.status === 'served' ? "bg-indigo-500" : "bg-green-500")} />
-                {activeOrder.status === 'served' ? "Order Served" : "Active Order Open"}
+                <div className={cn("h-2 w-2 rounded-full animate-pulse", activeSessionData.status === 'served' ? "bg-indigo-500" : "bg-green-500")} />
+                {activeSessionData.status === 'served' ? "All Items Served" : "Tab Open"}
             </div>
         )}
       </div>
@@ -447,7 +459,7 @@ export default function PortalPage() {
                 if (canModifyOrder) {
                     setTempQty(1); setTempNotes(""); setSelectedProduct(product)
                 } else {
-                    toast.info("Cannot add items to a completed order.")
+                    toast.info("Cannot add items. Session is closed.")
                 }
               }}
               className={cn(
@@ -499,9 +511,9 @@ export default function PortalPage() {
         </div>
       </div>
 
-      {/* 5. Active Order Tracker Pill */}
+      {/* 5. Active Session Tracker Pill */}
       <AnimatePresence>
-        {activeOrder && !isTrackerOpen && (
+        {activeSessionData && !isTrackerOpen && (
           <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -517,13 +529,13 @@ export default function PortalPage() {
              >
                <div className="relative h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
                  <BellRing className="h-5 w-5 text-primary" />
-                 {activeOrder.status !== 'served' && <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-500 rounded-full animate-pulse border-2 border-white" />}
+                 {activeSessionData.status !== 'served' && <span className="absolute top-2 right-2 h-2.5 w-2.5 bg-red-500 rounded-full animate-pulse border-2 border-white" />}
                </div>
                <div className="flex flex-col items-start text-xs">
-                   <span className="font-bold text-sm text-foreground">Order #{activeOrder.id}</span>
+                   <span className="font-bold text-sm text-foreground">Track Order</span>
                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                     <span className={cn("h-1.5 w-1.5 rounded-full", activeOrder.status === 'served' ? "bg-indigo-500" : "bg-orange-500")} />
-                     <span className="capitalize">{activeOrder.status}</span>
+                     <span className={cn("h-1.5 w-1.5 rounded-full", activeSessionData.status === 'served' ? "bg-indigo-500" : "bg-orange-500")} />
+                     <span className="capitalize">{activeSessionData.status}</span>
                    </div>
                </div>
              </Button>
@@ -540,27 +552,12 @@ export default function PortalPage() {
               <Button size="lg" onClick={() => setIsCartOpen(true)} className="w-full h-16 rounded-full bg-primary text-primary-foreground shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-[1.02] hover:bg-primary/90 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all flex items-center justify-between px-6 border-2 border-white/10">
                 <div className="flex items-center gap-3">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-background/20 backdrop-blur-sm text-sm font-bold">{cartCount}</div>
-                  <div className="flex flex-col items-start text-xs"><span className="font-bold text-base">{activeOrder ? "Update Order" : "View Order"}</span><span className="opacity-80 font-normal">Finish your meal</span></div>
+                  <div className="flex flex-col items-start text-xs"><span className="font-bold text-base">{activeSessionData ? "Update Order" : "View Order"}</span><span className="opacity-80 font-normal">Finish your meal</span></div>
                 </div>
                 <span className="font-bold text-xl tracking-tight">{formatMoney(cartTotal, currency)}</span>
               </Button>
             </div>
           </motion.div>
-        )}
-
-        {/* Scenario B: Served & Unpaid -> Show Pay Button */}
-        {!canModifyOrder && !isOrderPaid && !isTrackerOpen && activeOrder && (
-           <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="fixed bottom-6 left-0 right-0 z-50 px-4 pointer-events-none">
-             <div className="max-w-md mx-auto pointer-events-auto">
-               <Button size="lg" onClick={handlePayment} className="w-full h-16 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-[1.02] transition-all flex items-center justify-between px-6 border-2 border-white/10">
-                 <div className="flex items-center gap-3">
-                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20"><CreditCard className="h-5 w-5"/></div>
-                   <div className="flex flex-col items-start text-xs"><span className="font-bold text-base">Pay Bill</span><span className="opacity-90 font-normal">Secure Checkout</span></div>
-                 </div>
-                 <span className="font-bold text-xl">{formatMoney(cartTotal, currency)}</span>
-               </Button>
-             </div>
-           </motion.div>
         )}
 
         {/* Scenario C: Paid -> Show New Order Button */}
@@ -569,7 +566,7 @@ export default function PortalPage() {
                 <div className="max-w-md mx-auto pointer-events-auto">
                 <Button size="lg" onClick={handleNewOrder} className="w-full h-16 rounded-full bg-primary text-primary-foreground shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:scale-[1.02] hover:bg-primary/90 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all flex items-center justify-center gap-3 border-2 border-white/10">
                     <RotateCcw className="h-5 w-5" />
-                    <span className="font-bold text-lg">Place Another Order</span>
+                    <span className="font-bold text-lg">Start New Session</span>
                 </Button>
                 </div>
             </motion.div>
@@ -674,8 +671,8 @@ export default function PortalPage() {
                  </Button>
              </DrawerClose>
              <DrawerTitle className="flex flex-col items-center gap-0.5">
-               <span className="text-2xl font-bold">{activeOrder ? "Modify Order" : "Current Order"}</span>
-               {activeOrder && <span className="text-xs font-normal text-muted-foreground">Adding to Order #{activeOrder.id}</span>}
+               <span className="text-2xl font-bold">{activeSessionData ? "Modify Order" : "Current Order"}</span>
+               {activeSessionData && <span className="text-xs font-normal text-muted-foreground">Session Active</span>}
              </DrawerTitle>
           </DrawerHeader>
           
@@ -697,16 +694,17 @@ export default function PortalPage() {
                              {locked ? (
                                  <div className="flex flex-col items-center justify-center gap-2 h-full text-muted-foreground">
                                      <span className="font-bold text-lg">{item.quantity}</span>
-                                     <Lock className="h-4 w-4" />
+                                     <div className="h-4 w-4 bg-current mask-lock" /> {/* CSS mask or similar, represented by check below if generic */}
+                                     <CheckCircle2 className="h-4 w-4" />
                                  </div>
                              ) : (
                                  <>
-                                    <button onClick={() => handleIncrement(idx)} className="flex-1 w-full flex items-center justify-center hover:bg-primary/10 hover:text-primary transition-colors rounded-t-xl"><Plus className="h-3.5 w-3.5"/></button>
-                                    
-                                    <span className="font-bold text-sm py-1">{item.quantity}</span>
-                                    
-                                    <button onClick={() => handleDecrement(idx)} className="flex-1 w-full flex items-center justify-center hover:bg-destructive/10 hover:text-destructive transition-colors rounded-b-xl"><Minus className="h-3.5 w-3.5"/></button>
-                                 </>
+                                     <button onClick={() => handleIncrement(idx)} className="flex-1 w-full flex items-center justify-center hover:bg-primary/10 hover:text-primary transition-colors rounded-t-xl"><Plus className="h-3.5 w-3.5"/></button>
+                                     
+                                     <span className="font-bold text-sm py-1">{item.quantity}</span>
+                                     
+                                     <button onClick={() => handleDecrement(idx)} className="flex-1 w-full flex items-center justify-center hover:bg-destructive/10 hover:text-destructive transition-colors rounded-b-xl"><Minus className="h-3.5 w-3.5"/></button>
+                                  </>
                              )}
                         </div>
 
@@ -750,7 +748,7 @@ export default function PortalPage() {
               disabled={cart.length === 0 || isOrdering}
               onClick={handleOrderSubmission}
             >
-              {isOrdering ? "Sending to Kitchen..." : (activeOrder ? "Update Order" : "Confirm Order")}
+              {isOrdering ? "Sending to Kitchen..." : (activeSessionData ? "Update Tab" : "Place Order")}
               {!isOrdering && <ChevronRight className="h-5 w-5" />}
             </Button>
           </div>
@@ -761,7 +759,7 @@ export default function PortalPage() {
       <LiveOrderTracker 
         isOpen={isTrackerOpen} 
         onClose={() => setIsTrackerOpen(false)} 
-        order={activeOrder} 
+        sessionData={activeSessionData} 
         currency={currency}
       />
 
@@ -770,12 +768,11 @@ export default function PortalPage() {
 }
 
 /* -------------------------- Sub-components -------------------------- */
-// (Keeping your exact sub-components below as they are perfect)
 
-function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolean, onClose: () => void, order: ActiveOrder | null, currency: string }) {
-    if (!order) return null
+function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: boolean, onClose: () => void, sessionData: ActiveSessionData | null, currency: string }) {
+    if (!sessionData) return null
   
-    // Status mapping
+    // Status mapping for visual timeline
     const steps: { id: OrderStatus, label: string, icon: React.ReactNode }[] = [
       { id: 'pending', label: 'Received', icon: <Receipt className="h-4 w-4" /> },
       { id: 'preparing', label: 'Preparing', icon: <ChefHat className="h-4 w-4" /> },
@@ -783,8 +780,8 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
       { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-4 w-4" /> },
     ]
   
-    const currentStepIndex = steps.findIndex(s => s.id === order.status)
-    const orderTotal = order.items.reduce((acc, item) => acc + (item.product.price * item.quantity), 0)
+    const currentStepIndex = steps.findIndex(s => s.id === sessionData.status)
+    const orderTotal = sessionData.total_due // Use the aggregated session total
   
     return (
       <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -794,13 +791,13 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
           <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-between px-6 pt-6">
              <div className="text-left">
                <DrawerTitle className="text-2xl font-bold flex items-center gap-2">
-                 Order Status
+                 Session Status
                  <span className="flex h-2.5 w-2.5 relative">
                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                  </span>
                </DrawerTitle>
-               <p className="text-sm text-muted-foreground font-medium mt-1">Order #{order.id}</p>
+               <p className="text-sm text-muted-foreground font-medium mt-1">Session #{sessionData.session_id}</p>
              </div>
              <DrawerClose asChild>
                 <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 hover:bg-muted">
@@ -818,11 +815,11 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
                       <div className="relative">
                          <div className={cn(
                            "h-40 w-40 rounded-full flex flex-col items-center justify-center border-4 shadow-xl transition-all duration-700",
-                           order.status === 'served' 
+                           sessionData.status === 'served' 
                              ? "bg-green-50 border-green-200 text-green-700" 
                              : "bg-background border-primary/10 text-foreground"
                          )}>
-                            {order.status === 'served' ? (
+                            {sessionData.status === 'served' ? (
                                <>
                                  <CheckCircle2 className="h-10 w-10 mb-2 text-green-600" />
                                  <span className="font-bold text-lg">Completed</span>
@@ -830,14 +827,14 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
                             ) : (
                                <>
                                  <div className="text-4xl font-black tabular-nums tracking-tighter">
-                                   {order.estimatedTime.split(' ')[0]}
+                                   {sessionData.estimatedTime.split(' ')[0]}
                                  </div>
                                  <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground mt-1">Minutes</span>
                                  <span className="text-[10px] text-muted-foreground/60 font-medium mt-2 bg-muted px-2 py-0.5 rounded-full">ESTIMATED</span>
                                </>
                             )}
                          </div>
-                         {order.status !== 'served' && (
+                         {sessionData.status !== 'served' && (
                            <div className="absolute inset-0 rounded-full border-4 border-primary/20 animate-ping opacity-30 duration-1000" />
                          )}
                       </div>
@@ -878,7 +875,7 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
                   <div className="space-y-3">
                       <h3 className="font-semibold flex items-center gap-2 ml-1">
                           <Receipt className="h-4 w-4 text-primary" />
-                          Order Summary
+                          Session Summary
                       </h3>
                       <div className="bg-card rounded-2xl border border-border/50 overflow-hidden shadow-sm">
                           {/* Receipt Header */}
@@ -888,7 +885,7 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
                           </div>
                           {/* Receipt Items */}
                           <div className="p-4 space-y-4">
-                             {order.items.map((item, idx) => (
+                             {sessionData.items.map((item, idx) => (
                                  <div key={idx} className="flex justify-between items-start gap-4">
                                      <div className="flex gap-3">
                                          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[10px] font-bold shrink-0">
@@ -909,7 +906,7 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
                           </div>
                           {/* Receipt Total */}
                           <div className="bg-muted/30 p-4 border-t border-dashed border-border flex justify-between items-center">
-                             <span className="text-sm font-bold">Total Paid</span>
+                             <span className="text-sm font-bold">Total Due</span>
                              <span className="text-lg font-bold text-primary">{formatMoney(orderTotal, currency)}</span>
                           </div>
                       </div>
@@ -922,10 +919,10 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
           <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
              <Button 
                className="w-full h-14 text-lg font-bold rounded-xl shadow-lg text-white shadow-primary/10" 
-               variant={order.status === 'served' ? "default" : "secondary"}
+               variant={sessionData.status === 'served' ? "default" : "secondary"}
                onClick={onClose}
              >
-               {order.status === 'served' ? "Close Tracker" : "Browse Menu"}
+               {sessionData.status === 'served' ? "Close Tracker" : "Browse Menu"}
              </Button>
           </div>
   
@@ -955,4 +952,3 @@ function LiveOrderTracker({ isOpen, onClose, order, currency }: { isOpen: boolea
       </div>
     )
   }
-  

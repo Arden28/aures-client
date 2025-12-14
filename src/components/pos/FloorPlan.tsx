@@ -540,10 +540,20 @@ function useElapsedTimer(openedAt: string | null | undefined) {
     React.useEffect(() => {
         if (!openedAt) return
         
+        // FIX: Force UTC interpretation if the string doesn't specify a timezone.
+        // This prevents the timer from starting at "60m" or "3h" due to local offsets.
+        let cleanDateStr = openedAt
+        if (!openedAt.endsWith("Z") && !openedAt.includes("+")) {
+            cleanDateStr += "Z"
+        }
+
+        const start = new Date(cleanDateStr).getTime()
+        
         const update = () => {
-            const start = new Date(openedAt).getTime()
             const now = new Date().getTime()
+            // Math.max(0, ...) ensures we never show negative time if client clock is slightly behind
             const diff = Math.max(0, now - start)
+
             const m = Math.floor(diff / 60000)
             const h = Math.floor(m / 60)
             
@@ -561,7 +571,6 @@ function useElapsedTimer(openedAt: string | null | undefined) {
 
     return time
 }
-
 
 function LegendDot({ status, className }: { status: TableStatus, className?: string }) {
     const styles = tableStatusStylesReal(status)

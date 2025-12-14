@@ -57,7 +57,7 @@ const KDS_COLUMNS: { id: OrderStatusValue | 'preparing'; label: string; color: s
   { id: "pending", label: "To Do", color: "text-zinc-500", bg: "bg-zinc-500/10", icon: AlertCircle },
   { id: 'preparing', label: "Cooking", color: "text-orange-500", bg: "bg-orange-500/10", icon: Flame },
   { id: "ready", label: "Ready to Serve", color: "text-emerald-500", bg: "bg-emerald-500/10", icon: CheckCircle2 },
-  { id: "served", label: "Completed", color: "text-blue-500", bg: "bg-blue-500/10", icon: Check },
+  // { id: "served", label: "Completed", color: "text-blue-500", bg: "bg-blue-500/10", icon: Check },
 ]
 
 type TimeFilter = 'all' | '30m' | '60m'

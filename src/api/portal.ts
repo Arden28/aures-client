@@ -24,6 +24,7 @@ export type PortalProduct = {
 
 export type PortalCartItem = {
   tempId: string 
+  order_id?: number // ID of the specific order this item belongs to
   order_item_id?: number 
   product: PortalProduct
   quantity: number
@@ -34,20 +35,24 @@ export type PortalCartItem = {
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'completed' | 'cancelled'
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'refunded'
 
-export type ActiveOrder = {
-  id: number
-  items: PortalCartItem[]
-  status: OrderStatus
-  payment_status: PaymentStatus
+// Aggregated Data for the entire Session
+export type ActiveSessionData = {
+  session_id: number // The ID of the TableSession
+  status: OrderStatus // The status of the latest order (or aggregate status)
+  items: PortalCartItem[] // AGGREGATED list of items from all session orders
+  total_due: number // Sum of all orders in the session
   estimatedTime: string
   timestamp: number
 }
 
+// Session Metadata
 export type TableSession = {
-  id: string
+  id: number // Table ID
   table_name: string
   restaurant_name: string
   currency: string
+  active_session_id: number | null
+  session_status: string // e.g., 'active', 'waiting-payment'
 }
 
 /* --------------------------- API --------------------------- */
@@ -57,29 +62,22 @@ export async function fetchPortalData(tableCode: string) {
   return res.data
 }
 
-export async function placePortalOrder(tableCode: string, items: PortalCartItem[]): Promise<ActiveOrder> {
-  const res = await apiService.post<any>(`/v1/portal/${tableCode}/order`, { items })
-  return { 
-    id: res.data.id,
-    items: items, 
-    status: res.data.status,
-    payment_status: 'unpaid', 
-    estimatedTime: res.data.estimatedTime,
-    timestamp: res.data.timestamp
-  }
+export async function placePortalOrder(tableCode: string, sessionId: number | null, items: PortalCartItem[]): Promise<ActiveSessionData> {
+  // Determine if we are updating an existing order (session)
+  const payload = { items, session_id: sessionId }
+
+  // We send the request
+  await apiService.post<any>(`/v1/portal/${tableCode}/order`, payload)
+
+  // IMPORTANT: We immediately re-fetch the full portal data to get the 
+  // correct aggregated state (totals, item IDs, merged orders) from the server.
+  const fullSessionData = await fetchPortalData(tableCode);
+  
+  // Return the aggregated active order data
+  return fullSessionData.active_order as ActiveSessionData;
 }
 
-export async function updatePortalOrder(tableCode: string, orderId: number, items: PortalCartItem[]): Promise<ActiveOrder> {
-  const res = await apiService.put<any>(`/v1/portal/${tableCode}/order/${orderId}`, { items })
-  return { 
-    id: orderId,
-    items: items,
-    status: res.data.status,
-    payment_status: 'unpaid',
-    estimatedTime: res.data.estimatedTime,
-    timestamp: res.data.timestamp
-  }
-}
+// NOTE: updatePortalOrder is removed/merged into placePortalOrder for session logic
 
 // --- REAL-TIME SUBSCRIPTION ---
 
@@ -91,20 +89,16 @@ type RealtimeCallbacks = {
 export function subscribeToOrderUpdates(orderId: number, callbacks: RealtimeCallbacks) {
   if (!echo) return () => {};
 
-  // console.log(`Listening to PUBLIC channel: order.${orderId}`);
-
-  // FIX: Use .channel() instead of .private() to skip authentication
+  // Subscribe to the specific order channel
   const channel = echo.channel(`order.${orderId}`);
 
   channel.listen('.order.status.updated', (e: any) => {
-      // console.log('Order Status Event:', e);
       if (e.new_status) {
           callbacks.onOrderStatus(e.new_status as OrderStatus);
       }
   });
 
   channel.listen('.order.item.status.updated', (e: any) => {
-      // console.log('Item Status Event:', e);
       if (e.item_id && e.new_status) {
           callbacks.onItemStatus(e.item_id, e.new_status as OrderItemStatus);
       }
