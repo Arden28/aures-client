@@ -85,7 +85,7 @@ export async function placePortalOrder(tableCode: string, sessionId: number | nu
   const fullSessionData = await fetchPortalData(tableCode);
   
   // Return the aggregated active order data
-  return fullSessionData.active_order as ActiveSessionData;
+  return fullSessionData.active_session as ActiveSessionData;
 }
 
 export async function closePortalSession(tableCode: string, sessionId: number) {

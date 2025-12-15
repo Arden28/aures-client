@@ -5,7 +5,8 @@ import { AnimatePresence, motion } from "framer-motion"
 import { 
   ShoppingBag, Minus, Plus, ChevronRight, ChevronLeft, Search, 
   Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt,
-  RotateCcw, CreditCard, Clock
+  RotateCcw, CreditCard, Clock,
+  Check
 } from "lucide-react"
 
 import { cn, formatMoney } from "@/lib/utils"
@@ -738,10 +739,13 @@ export default function PortalPage() {
               </div>
             ) : (
               cart.map((item, idx) => {
-                const locked = isLocked(item.status);
+                const locked = isLocked(item.order_status);
 
                 return (
                     <div key={idx} className={cn("flex items-start justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards", locked && "opacity-80")} style={{ animationDelay: `${idx * 50}ms` }}>
+                    
+                    {/* <pre>{JSON.stringify(item, null, 2)}</pre> */}
+                    
                     <div className="flex items-center gap-4">
                         {/* Qty Control / Lock Status */}
                         <div className={cn("flex flex-col items-center justify-center rounded-xl border w-10 h-24 shrink-0", locked ? "bg-muted/40 border-transparent" : "bg-muted/30 border-primary/20")}>
@@ -765,7 +769,7 @@ export default function PortalPage() {
                         <div>
                         <div className="flex items-center gap-2">
                              <p className="font-bold text-base">{item.product.name}</p>
-                             {locked && <span className="text-[10px] uppercase font-bold bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">{item.status}</span>}
+                             {locked && <span className="text-[10px] uppercase font-bold bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">{item.order_status}</span>}
                         </div>
                         <p className="text-sm text-muted-foreground">{formatMoney(item.product.price, currency)} each</p>
                         {item.notes && (
@@ -826,19 +830,35 @@ export default function PortalPage() {
 
 function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: boolean, onClose: () => void, sessionData: ActiveSessionData | null, currency: string }) {
     if (!sessionData) return null
-    // Fallback logic: If 'orders' array is empty (backend issue) but 'items' exist, create a virtual order
-    let orders = (sessionData as any).orders || [];
-    
-    if (orders.length === 0 && sessionData.items.length > 0) {
-        orders = [{
-            id: sessionData.session_id, // Use session ID as proxy
-            status: sessionData.status,
-            items: sessionData.items,
-            total: sessionData.total_due,
-            estimatedTime: sessionData.estimatedTime,
-            timestamp: sessionData.timestamp
-        }];
-    }
+
+
+  // 1. Prepare Orders
+  let orders = (sessionData as any).orders || [];
+
+  // Fallback: Virtual order if orders array is missing but items exist
+  if (orders.length === 0 && sessionData.items.length > 0) {
+    orders = [{
+      id: sessionData.session_id,
+      status: sessionData.status,
+      items: sessionData.items,
+      total: sessionData.total_due, // Fallback to session total
+      estimatedTime: sessionData.estimatedTime,
+      timestamp: sessionData.timestamp
+    }];
+  }
+
+  // 2. Sort: Active orders first, then completed/cancelled
+  const sortedOrders = [...orders].sort((a: any, b: any) => {
+     const score = (s: string) => {
+       if (['ready', 'preparing', 'pending'].includes(s)) return 2;
+       if (s === 'served') return 1;
+       return 0;
+     }
+     return score(b.status) - score(a.status) || b.id - a.id;
+  });
+
+  // 3. Fix Total: Calculate sum of ONLY the orders shown
+  const ordersTotal = sortedOrders.reduce((acc: number, o: any) => acc + (o.status !== 'cancelled' ? o.total : 0), 0);
 
     return (
       <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -852,7 +872,9 @@ function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: 
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                   </span>
                 </DrawerTitle>
-                <p className="text-sm text-muted-foreground font-medium mt-1">Session #{sessionData.session_id}</p>
+                {/* <p className="text-sm text-muted-foreground font-medium mt-1">Session #{sessionData.session_id}</p> */}
+                
+                {/* <pre>{JSON.stringify(orders, null, 2)}</pre> */}
               </div>
               <DrawerClose asChild>
                  <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 hover:bg-muted">
@@ -872,7 +894,7 @@ function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: 
              )}
              
              <div className="border-t pt-4 mt-8">
-                 <div className="flex justify-between text-xl font-bold"><span>Total Due</span><span>{formatMoney(sessionData.total_due, currency)}</span></div>
+                 <div className="flex justify-between text-xl font-bold"><span>Total Due</span><span>{formatMoney(ordersTotal, currency)}</span></div>
              </div>
           </div>
           
@@ -892,140 +914,253 @@ function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: 
     )
 }
 
+
 function OrderTrackerCard({ order, currency }: { order: OrderSummary, currency: string }) {
-    const steps = [
-        { id: 'pending', label: 'Received', icon: <Receipt className="h-3.5 w-3.5" /> }, 
-        { id: 'preparing', label: 'Cooking', icon: <ChefHat className="h-3.5 w-3.5" /> }, 
-        { id: 'ready', label: 'Ready', icon: <BellRing className="h-3.5 w-3.5" /> }, 
-        { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-3.5 w-3.5" /> }
-    ]
-    
-    // Normalize status: 'completed' is visually the same as 'served' here
-    const statusToCheck = order.status === 'completed' ? 'served' : order.status;
-    const currentIdx = steps.findIndex(s => s.id === statusToCheck);
-    // Safety check if status isn't found (e.g. cancelled), default to 0
-    const safeIdx = currentIdx === -1 ? 0 : currentIdx;
+  // 1. Define the happy path steps
+  const steps = [
+    { id: 'pending', label: 'Received', icon: <Receipt className="h-3.5 w-3.5" /> }, 
+    { id: 'preparing', label: 'Cooking', icon: <ChefHat className="h-3.5 w-3.5" /> }, 
+    { id: 'ready', label: 'Ready', icon: <BellRing className="h-3.5 w-3.5" /> }, // Changed icon to BellRing
+    { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-3.5 w-3.5" /> }
+  ]
 
-    return (
-        <div className="flex flex-col gap-6 py-6 first:pt-2 border-b border-border/40 last:border-0">
-            
-            {/* Header Section */}
-            <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-lg tracking-tight">Order #{order.id}</h3>
-                        <span className="text-xs text-muted-foreground font-medium bg-muted/50 px-2 py-0.5 rounded-md">
-                            {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                        {order.items.length} {order.items.length === 1 ? 'item' : 'items'}
-                    </p>
-                </div>
-                
-                {/* Status Badge - Minimalist */}
-                <div className={cn(
-                    "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5",
-                    order.status === 'served' || order.status === 'completed'
-                        ? "bg-primary/10 text-primary" // Use App Primary for Success
-                        : "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                )}>
-                    <div className={cn(
-                        "h-1.5 w-1.5 rounded-full", 
-                        order.status === 'served' || order.status === 'completed' ? "bg-primary" : "bg-orange-500 animate-pulse"
-                    )} />
-                    {order.status}
-                </div>
-            </div>
+  // 2. Handle Edge Cases (Cancelled/Refunded)
+  const isCancelled = order.status === 'cancelled';
+  
+  // 3. Normalize Status for the Stepper
+  // Map 'completed' -> 'served' for the UI. 
+  const statusForStepper = order.status === 'completed' ? 'served' : order.status;
+  
+  // Find current index. If status is unknown (like cancelled), default to -1
+  const currentIdx = steps.findIndex(s => s.id === statusForStepper);
+  
+  // Progress Calculation
+  // If cancelled, 0 progress. If served/completed, 100%.
+  const progressPercent = isCancelled 
+    ? 0 
+    : (currentIdx / (steps.length - 1)) * 100;
 
-            {/* Modern Stepper */}
-            <div className="relative">
-                {/* Background Track */}
-                <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-muted -translate-y-1/2 rounded-full" />
-                
-                {/* Active Progress Track */}
-                <motion.div 
-                    className="absolute top-1/2 left-0 h-0.5 bg-primary -translate-y-1/2 rounded-full origin-left"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${(safeIdx / (steps.length - 1)) * 100}%` }}
-                    transition={{ duration: 0.8, ease: "circOut" }}
-                />
-
-                <div className="relative flex justify-between w-full">
-                    {steps.map((step, i) => {
-                        const isCompleted = i <= safeIdx;
-                        const isCurrent = i === safeIdx;
-
-                        return (
-                            <div key={step.id} className="flex flex-col items-center gap-2">
-                                <motion.div 
-                                    initial={false}
-                                    animate={{ 
-                                        backgroundColor: isCompleted ? "hsl(var(--primary))" : "hsl(var(--background))",
-                                        borderColor: isCompleted ? "hsl(var(--primary))" : "hsl(var(--muted))",
-                                        scale: isCurrent ? 1.1 : 1
-                                    }}
-                                    className={cn(
-                                        "h-8 w-8 rounded-full border-2 flex items-center justify-center z-10 transition-colors duration-300",
-                                        // Text color logic
-                                        isCompleted ? "text-primary-foreground" : "text-muted-foreground"
-                                    )}
-                                >
-                                    {/* Icon */}
-                                    <div className="scale-75">
-                                        {step.icon}
-                                    </div>
-                                </motion.div>
-                                
-                                {/* Label */}
-                                <span className={cn(
-                                    "absolute top-10 text-[10px] font-semibold uppercase tracking-wide transition-colors duration-300 w-20 text-center",
-                                    isCurrent ? "text-foreground font-bold" : "text-muted-foreground/60"
-                                )}>
-                                    {step.label}
-                                </span>
-                            </div>
-                        )
-                    })}
-                </div>
-            </div>
-
-            {/* Spacer for stepper labels */}
-            <div className="h-2" />
-
-            {/* Items List - Clean & Notion-like */}
-            <div className="bg-muted/30 rounded-lg p-4 space-y-3">
-                {order.items.map((item: any, idx: number) => (
-                    <div key={idx} className="flex justify-between items-start text-sm">
-                        <div className="flex gap-3 items-start">
-                            <span className="font-mono text-muted-foreground text-xs pt-0.5">{item.quantity}x</span>
-                            <div className="flex flex-col">
-                                <span className="font-medium text-foreground">{item.product.name}</span>
-                                {item.notes && (
-                                    <span className="text-[10px] text-muted-foreground italic mt-0.5 flex items-center gap-1">
-                                        <span className="w-1 h-1 rounded-full bg-orange-400/50" />
-                                        {item.notes}
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                        <span className="font-mono text-muted-foreground text-xs">
-                            {formatMoney(item.quantity * item.product.price, currency)}
-                        </span>
-                    </div>
-                ))}
-                
-                {/* Dashed Separator */}
-                <div className="border-t border-dashed border-border/50 my-2" />
-                
-                {/* Subtotal Row */}
-                <div className="flex justify-between items-center pt-1">
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Subtotal</span>
-                    <span className="font-bold text-base text-foreground">{formatMoney(order.total, currency)}</span>
-                </div>
-            </div>
+  return (
+    <div className={cn(
+      "flex flex-col gap-5 py-6 border-b border-border/50 last:border-0 last:pb-0 first:pt-2 transition-opacity",
+      isCancelled && "opacity-60 grayscale-[0.8]" // Dim cancelled orders
+    )}>
+      
+      {/* --- Header: Order Info & Main Status --- */}
+      <div className="flex items-start justify-between">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2.5">
+            <h3 className="font-bold text-lg tracking-tight text-foreground">
+              Order #{order.id}
+            </h3>
+            <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md border border-border/50">
+              {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground font-medium pl-0.5">
+            {order.items.length} {order.items.length === 1 ? 'item' : 'items'} &bull; {order.estimatedTime || 'ASAP'}
+          </p>
         </div>
-    )
+        
+        {/* Status Badge */}
+        <div className={cn(
+          "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm border",
+          isCancelled 
+            ? "bg-red-100 text-red-700 border-red-200"
+            : order.status === 'served' || order.status === 'completed'
+              ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
+              : "bg-primary/10 text-primary border-primary/20"
+        )}>
+          {/* Pulsing Dot for active statuses */}
+          {!isCancelled && order.status !== 'served' && order.status !== 'completed' && (
+             <span className="relative flex h-2 w-2">
+               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-75"></span>
+               <span className="relative inline-flex rounded-full h-2 w-2 bg-current"></span>
+             </span>
+          )}
+          {isCancelled ? "Cancelled" : order.status}
+        </div>
+      </div>
+
+      {/* --- Stepper (Hide if cancelled) --- */}
+      {!isCancelled && (
+        <div className="w-full max-w-4xl mx-auto px-4 py-10">
+      <div className="relative">
+        
+        {/* 1. The Track - Matte & Solid
+            A simple, clean line. No blur, no glass. 
+            looks like a table runner or a timeline.
+        */}
+        <div className="absolute top-1/2 left-0 right-0 h-1 bg-muted/60 rounded-full -translate-y-1/2" />
+
+        {/* 2. The Progress Fill
+            Solid color. High contrast. 
+        */}
+        <motion.div
+          className="absolute top-1/2 left-0 h-1 bg-primary rounded-full -translate-y-1/2 origin-left z-0"
+          initial={{ width: "0%" }}
+          animate={{ width: `${(currentIdx / (steps.length - 1)) * 100}%` }}
+          transition={{ duration: 0.8, ease: "easeInOut" }}
+        />
+
+        {/* 3. The Steps */}
+        <div className="relative flex justify-between w-full z-10">
+          {steps.map((step, i) => {
+            const isActive = currentIdx === i;
+            const isCompleted = currentIdx > i;
+            const isPending = currentIdx < i;
+
+            return (
+              <div key={step.id} className="relative flex flex-col items-center group cursor-default">
+                
+                {/* The "Plate" Circle */}
+                <motion.div
+                  className={cn(
+                    "relative flex items-center justify-center w-12 h-12 rounded-full border-2 transition-colors duration-300 bg-background",
+                    // Completed: Solid Fill (Brand Color)
+                    isCompleted ? "bg-primary border-primary text-primary-foreground" : 
+                    // Active: White Plate with Color Rim
+                    isActive ? "border-primary text-primary" : 
+                    // Pending: Greyed out
+                    "border-muted text-muted-foreground/40"
+                  )}
+                  initial={false}
+                  animate={{
+                    scale: isActive ? 1.25 : 1, // Active step gets bigger (The Main Course)
+                    backgroundColor: isCompleted ? "var(--primary)" : "var(--background)",
+                  }}
+                  transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                >
+                  
+                  {/* The Double Ring Effect for Active State (Like a clean plate rim) */}
+                  {isActive && (
+                    <motion.div
+                      layoutId="plate-ring"
+                      className="absolute -inset-[5px] rounded-full border border-primary/30"
+                      transition={{ duration: 0.3 }}
+                    />
+                  )}
+
+                  {/* Icon Switcher */}
+                  <AnimatePresence mode="wait">
+                    {isCompleted ? (
+                      <motion.div
+                        key="check"
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="flex items-center justify-center"
+                      >
+                         {/* <Check className="w-6 h-6 stroke-[3]" /> */}
+                          <div className="h-[15px]">{step.icon}</div>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="icon"
+                        className="flex items-center justify-center"
+                        // The "Bell Ring" Animation
+                        // A slow, pendulum swing. Distinctly "analog" feel.
+                        animate={isActive ? { rotate: [0, 10, -10, 5, -5, 0] } : { rotate: 0 }}
+                        transition={isActive ? {
+                          repeat: Infinity,
+                          repeatDelay: 2, // Calm waits between movements
+                          duration: 2,
+                          ease: "easeInOut"
+                        } : {}}
+                      >
+                        <div className="w-5 h-5">
+                            {step.icon}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+
+                {/* Typography: Clean, Menu-style */}
+                <div className="absolute top-16 w-32 flex flex-col items-center text-center">
+                  <span className={cn(
+                    "text-xs font-bold tracking-wider uppercase transition-colors duration-300",
+                    isActive ? "text-primary" : "text-muted-foreground",
+                    // Hide inactive labels on mobile to keep it clean
+                    !isActive && "hidden sm:block"
+                  )}>
+                    {step.label}
+                  </span>
+                  
+                  {/* Optional: Add a "Serving" status text for the active item */}
+                  {isActive && (
+                    <motion.span 
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-[10px] text-muted-foreground font-medium mt-1 sm:hidden"
+                    >
+                      Step {i + 1}
+                    </motion.span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+      )}
+
+      {/* --- Item List (With Granular Status) --- */}
+      <div className="bg-muted/20 rounded-xl border border-border/40 overflow-hidden mt-1">
+        <div className="px-4 py-3 space-y-3">
+          {order.items.map((item: any, idx: number) => {
+            // Check if item status differs significantly from order status
+            const showItemStatus = item.status && item.status !== 'pending' && item.status !== 'served';
+            
+            return (
+              <div key={idx} className="flex justify-between items-start text-sm group">
+                <div className="flex gap-3 items-start">
+                  <span className="font-mono text-xs font-bold text-muted-foreground bg-background border border-border/60 rounded px-1.5 min-w-[26px] text-center pt-0.5 shadow-sm">
+                    {item.quantity}x
+                  </span>
+                  <div className="flex flex-col leading-snug">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-foreground/90">{item.product.name}</span>
+                      
+                      {/* <pre>{JSON.stringify(order, null, 2)}</pre> */}
+
+                      {/* Granular Item Status Badge */}
+                      {showItemStatus && (
+                         <span className={cn(
+                           "text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
+                           item.status === 'cooking' ? "bg-orange-100 text-orange-600" :
+                           item.status === 'ready' ? "bg-blue-100 text-blue-600" :
+                           "bg-gray-100 text-gray-600"
+                         )}>
+                           {item.status}
+                         </span>
+                      )}
+                    </div>
+
+                    {item.notes && (
+                      <span className="text-[11px] text-orange-600/90 italic mt-0.5 flex items-start gap-1">
+                        <span className="text-[9px] leading-[14px]">📝</span> 
+                        {item.notes}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span className="font-mono text-xs text-muted-foreground pt-0.5">
+                  {formatMoney(item.quantity * item.product.price, currency)}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+        
+        {/* Total Footer */}
+        <div className="bg-muted/40 border-t border-border/40 px-4 py-3 flex justify-between items-center">
+          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Order Total</span>
+          <span className="font-bold text-sm text-foreground">{formatMoney(order.total, currency)}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function PortalSkeleton() { 
