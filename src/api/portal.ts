@@ -25,6 +25,7 @@ export type PortalProduct = {
 export type PortalCartItem = {
   tempId: string 
   order_id?: number // ID of the specific order this item belongs to
+  order_status?: OrderStatus // Status of the specific order
   order_item_id?: number 
   product: PortalProduct
   quantity: number
