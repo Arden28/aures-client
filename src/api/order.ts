@@ -29,6 +29,13 @@ export type MiniRef = {
   name: string
 }
 
+export type SessionMini = {
+  id: number
+  close_at: string | null
+  opened_at: string | null
+  status: string
+}
+
 export type OrderItemMini = {
   id: number
   name: string | null
@@ -60,7 +67,9 @@ export type Order = {
   waiter?: MiniRef | null
   
   // Critical for Session Grouping in Cashier
-  table_session_id?: number | null 
+  table_session_id?: number | null
+  
+  table_session?: SessionMini | null
 
   status: OrderStatusValue
   source: string

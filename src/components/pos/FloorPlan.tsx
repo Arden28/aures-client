@@ -119,8 +119,19 @@ export function FloorPlan() {
             setTables(tableList)
             
             const orders = Array.isArray(orderRes) ? orderRes : (orderRes.items || [])
-            // Safety Filter: Ensure only truly active orders are stored
-            setActiveOrders(orders.filter(o => ['pending', 'preparing', 'ready', 'served'].includes(o.status)))
+
+            // Filter logic:
+            // We only want orders that are active AND belong to an active session (or no session yet)
+            // If a session is closed, those orders are "history" for the floor plan purposes.
+            setActiveOrders(orders.filter(o => {
+                const isOrderActive = ['pending', 'preparing', 'ready', 'served'].includes(o.status);
+                
+                // If order has a session, check if that session is active
+                // (Assumes backend returns table_session relationship properly)
+                const isSessionActive = o.table_session ? o.table_session.status !== 'closed' : true;
+
+                return isOrderActive && isSessionActive;
+            }))
 
             if (floorList.length > 0 && !activeFloorId) {
                 setActiveFloorId(floorList[0].id)
@@ -224,12 +235,26 @@ export function FloorPlan() {
                                             </div>
                                         ) : (
                                             floorTables.map((table) => {
-                                                //  UPDATED LOGIC START
-                                                const tableActiveOrders = activeOrders.filter(o => o.table?.id === table.id);
+                                                
+                                                // 1. ROBUST FILTERING
+                                                const tableActiveOrders = activeOrders.filter(o => {
+                                                    // Ensure order has a table assigned
+                                                    if (!o.table || !o.table.id) return false;
+                                                    
+                                                    // Use String() conversion to handle "5" vs 5 mismatches
+                                                    return String(o.table.id) === String(table.id);
+                                                });
 
-                                                const activeOrdersTotal = tableActiveOrders.reduce((sum, order) => sum + order.total, 0);
+                                                // 2. Calculate Total
+                                                const activeOrdersTotal = tableActiveOrders.reduce((sum, order) => sum + Number(order.total), 0);
 
+                                                // 3. Determine Status
                                                 const criticalOrderStatus = getCriticalOrderStatus(tableActiveOrders);
+
+                                                // Debug log (Optional: remove in production)
+                                                if (tableActiveOrders.length > 0) {
+                                                    console.log(`[Table ${table.name}] Orders Found:`, tableActiveOrders.length, "IDs:", tableActiveOrders);
+                                                }
 
                                                 //  UPDATED LOGIC END
                                                 return (
@@ -422,6 +447,9 @@ function TableDetailsPopoverContent({
     const hasActiveOrders = tableActiveOrders.length > 0 
     const criticalOrder = tableActiveOrders[0] 
     const elapsed = useElapsedTimer(criticalOrder?.opened_at)
+
+    // If there are no active orders, strictly rely on the table status.
+    const effectiveStatus = hasActiveOrders ? (criticalOrder?.status || 'Active') : table.status;
     
     // Status Checks
     const isNeedsCleaning = table.status === 'needs_cleaning'
@@ -435,7 +463,7 @@ function TableDetailsPopoverContent({
             return;
         }
 
-        if (!window.confirm(`Finish service for ${table.name}? This will close the session and mark table for cleaning.`)) {
+        if (!window.confirm(`Finish service for ${table.name}? \n\nThis will close the session and mark table for cleaning.`)) {
             return;
         }
 
@@ -444,9 +472,22 @@ function TableDetailsPopoverContent({
             toast.success("Service finished. Table marked for cleaning.");
             if (refreshData) refreshData();
         } catch (e: any) {
-            console.error(e);
-            // Handle specific backend errors (like unpaid bills)
-            const msg = e.response?.data?.message || "Could not close session.";
+            console.error("Close Session Error:", e);
+            
+            // --- ROBUST ERROR EXTRACTION ---
+            // 1. Try standard Laravel JSON message (e.g. "Cannot close session...")
+            let msg = e.response?.data?.message;
+
+            // 2. If 'message' is missing, check if it's inside an 'error' key
+            if (!msg && e.response?.data?.error) {
+                msg = e.response.data.error;
+            }
+
+            // 3. If still nothing, fallback to the HTTP status text or a default
+            if (!msg) {
+                msg = e.message || "Could not close session. Please try again.";
+            }
+
             toast.error(msg);
         }
     }
@@ -531,10 +572,20 @@ function TableDetailsPopoverContent({
                 
                 {/* C. NEEDS CLEANING STATE */}
                 {isNeedsCleaning && !hasActiveOrders && !isReserved && (
-                    <Button onClick={onMarkClean} className="w-full border-border bg-background hover:bg-accent text-foreground h-9 text-xs sm:text-sm" variant="outline">
-                        <Sparkles className="w-3.5 h-3.5 mr-2 text-blue-500" />
-                        Mark as Cleaned
-                    </Button>
+                    <div className="space-y-3">
+                        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-center dark:border-blue-800 dark:bg-blue-900/20">
+                            <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
+                                Session closed. Table needs cleaning before seating new guests.
+                            </p>
+                        </div>
+                        <Button 
+                            onClick={onMarkClean} 
+                            className="w-full h-11 text-base font-semibold shadow-md bg-blue-600 hover:bg-blue-700 text-white border-transparent"
+                        >
+                            <Sparkles className="w-4 h-4 mr-2" />
+                            Mark as Clean & Free
+                        </Button>
+                    </div>
                 )}
 
                 {/* D. FREE STATE: No button needed (Orders start elsewhere) */}
@@ -629,11 +680,13 @@ function tableStatusStylesReal(status: TableStatus) {
             }
         case "needs_cleaning":
             return {
-                border: "border-slate-400/60 dark:border-slate-500",
-                textIcon: "text-slate-600 dark:text-slate-300",
-                dotBg: "bg-slate-400",
-                badgeCls: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700",
-                icon: AlertCircle
+                // Changing to a more obvious "Blue/Info" or "Purple" style to indicate "Action Needed"
+                // rather than just gray/slate which looks disabled.
+                border: "border-blue-400 dark:border-blue-500 border-dashed", // Dashed border implies "incomplete/transition"
+                textIcon: "text-blue-600 dark:text-blue-300",
+                dotBg: "bg-blue-400 animate-pulse", // Pulse the dot to catch attention
+                badgeCls: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700",
+                icon: Sparkles // Use Sparkles icon
             }
         default:
             return {
