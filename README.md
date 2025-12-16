@@ -1,6 +1,6 @@
 <div align="center">
   <br />
-  <a href="https://github.com/yourusername/tapla-frontend">
+  <a href="https://github.com/Arden28/aures-client">
     <img src="public/images/logo.png" alt="Tapla Logo" width="150" />
   </a>
   <br />
@@ -49,6 +49,14 @@ It is divided into three distinct synchronized interfaces:
 
 ---
 
+## 📸 Interface Previews
+
+| **Waiter Mobile View** | **Kitchen Display System** |
+|:---:|:---:|
+| <img src="https://placehold.co/300x600/18181b/FFF?text=Waiter+UI" alt="Waiter UI" width="250" /> | <img src="https://placehold.co/600x400/18181b/FFF?text=KDS+Board" alt="KDS UI" width="400" /> |
+
+---
+
 ## ✨ Key Features
 
 * **🖥️ Point of Sale (POS):** Interactive interface for waiters and cashiers to manage orders and payments.
@@ -57,48 +65,6 @@ It is divided into three distinct synchronized interfaces:
 * **📱 QR Customer Portal:** Progressive Web App (PWA) allowing customers to scan tables and order directly.
 * **📊 Executive Dashboard:** Real-time analytics, revenue tracking, and staff performance metrics with auto-polling.
 * **⚡ Real-time Sync:** Instant updates across all devices using WebSockets (Pusher).
-
----
-
-## 📸 Interface Previews
-
-| **Waiter Mobile View** | **Kitchen Display System** |
-|:---:|:---:|
-| <img src="https://placehold.co/300x600/18181b/FFF?text=Waiter+UI" alt="Waiter UI" width="250" /> | <img src="https://placehold.co/600x400/18181b/FFF?text=KDS+Board" alt="KDS UI" width="400" /> |
-
----
-## 🛠️ Tech Stack
-
-### Frontend (Client)
-* **Framework:** React 18 + TypeScript
-* **Build Tool:** Vite
-* **Styling:** TailwindCSS + Shadcn/UI
-* **State/Data:** TanStack Query (React Query)
-* **Animations:** Framer Motion
-* **Charts:** Recharts
-
-### Backend (Server)
-* **Framework:** Laravel 10/11 (PHP)
-* **Database:** MySQL 8.0+
-* **Authentication:** Laravel Sanctum (SPA Auth)
-* **Broadcasting:** Pusher Channels (WebSockets)
-* **API:** RESTful JSON API
-
----
-
-## 🛠 Tech Stack
-
--   **Core:** [React 18](https://react.dev/) + [Vite](https://vitejs.dev/)
--   **Language:** [TypeScript](https://www.typescriptlang.org/)
--   **Styling:** [Tailwind CSS](https://tailwindcss.com/) + [Shadcn UI](https://ui.shadcn.com/)
--   **Icons:** [Lucide React](https://lucide.dev/)
--   **Real-time:** [Laravel Echo](https://github.com/laravel/echo) + [Pusher JS](https://github.com/pusher/pusher-js)
--   **State/Data:** Axios & React Hooks
--   **Drag & Drop:** Mobile-drag-drop (Polyfill for touch devices)
-
----
-
-## 🚀 Key Features
 
 ### 🤵 Waiter Interface
 -   **Live Task Feed:** Real-time push notifications and audio alerts for new table assignments and "Order Ready" signals.
@@ -119,93 +85,224 @@ It is divided into three distinct synchronized interfaces:
 
 ---
 
+## 🛠️ Tech Stack
+
+### Frontend (Client)
+* **Framework:** React 18 + TypeScript
+* **Build Tool:** Vite
+* **Styling:** TailwindCSS + Shadcn/UI
+* **Icons:** [Lucide React](https://lucide.dev/)
+* **State/Data:** TanStack Query (React Query)
+* **Animations:** Framer Motion
+* **Charts:** Recharts
+* **Drag & Drop:** Mobile-drag-drop (Polyfill for touch devices)
+* **Real-time:** [Laravel Echo](https://github.com/laravel/echo) + [Pusher JS](https://github.com/pusher/pusher-js)
+
+### Backend (Server)
+* **Framework:** Laravel 12 (PHP)
+* **Database:** MySQL 8.0+
+* **Cache / Queue:** Redis
+* **Authentication:** Laravel Sanctum (SPA Auth)
+* **Broadcasting:** Pusher Channels (WebSockets)
+* **API:** RESTful JSON API
+
+---
+
 ## ⚙️ Installation & Setup
 
 ### Prerequisites
--   Node.js (v18+)
--   NPM or Yarn
--   A running instance of the [Tapla Backend API](https://github.com/your-username/tapla-backend)
+* Node.js (v18+)
+* PHP (v8.2+) & Composer
+* MySQL Server
+* A free [Pusher](https://pusher.com/) account (or a local Laravel Reverb setup)
 
-### 1. Clone the repository
+### 1. Backend Setup (Laravel)
+
 ```bash
+# Clone the repository
+git clone [https://github.com/Arden28/aures-api.git](https://github.com/Arden28/aures-api.git)
+cd tapla-backend
 
-git clone https://github.com/your-username/tapla-frontend.git
+# Install dependencies
+composer install
+
+# Environment setup
+cp .env.example .env
+php artisan key:generate
+
+# Database & Migration
+# (Ensure you created a database named 'tapla' in MySQL)
+php artisan migrate --seed
+
+# Link Storage
+php artisan storage:link
+
+# Start Server
+php artisan serve
+
+```
+
+
+### 2. Frontend Setup (React)
+
+```bash
+# Clone the repository
+git clone https://github.com/Arden28/aures-client.git
 cd tapla-frontend
 
-```
-2. Install Dependencies
-
-``` bash
-
+# Install dependencies
 npm install
 
+# Environment setup
+# Create a .env file based on the example below
+touch .env
+
+# Start Dev Server
+npm run dev
 ```
 
-### 3. Configure Environment
-Create a .env file in the root directory:
+---
 
-``` bash
+## ⚙️ Configuration
 
-cp .env.example .env
+### Backend `.env`
 
+Configure your database and Pusher credentials here.
+
+```ini
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=tapla
+DB_USERNAME=root
+DB_PASSWORD=
+
+BROADCAST_DRIVER=pusher
+
+PUSHER_APP_ID=your_app_id
+PUSHER_APP_KEY=your_app_key
+PUSHER_APP_SECRET=your_app_secret
+PUSHER_APP_CLUSTER=mt1
+
+# Allow frontend requests (CORS)
+FRONTEND_URL=http://localhost:5173
 ```
 
-Update the variables with your configuration:
+---
+
+### Frontend `.env`
+
+Create this file in the root of your React project.
+
+```ini
+# Base URL for the Laravel API
+VITE_API_BASE_URL=http://localhost:8000/api
+
+# Pusher Configuration (Must match backend)
+VITE_PUSHER_APP_KEY=your_app_key
+VITE_PUSHER_CLUSTER=mt1
+```
+
+---
+
+## 🌍 Deployment Guide
+
+Since the frontend and backend are decoupled, they should be deployed as separate services.
+
+---
+
+### Part A: Backend Deployment (VPS / DigitalOcean / AWS)
+
+* **Server:** Ubuntu 22.04 with Nginx, PHP 8.2, and MySQL
+* **Pull Code:** Clone the backend repo to `/var/www/tapla-api`
+* **Install:**
 
 ```bash
-
-# API Connection
-VITE_API_URL=https://api.your-domain.com
-
-# Real-time Configuration (Pusher)
-VITE_PUSHER_APP_KEY=your_pusher_key
-VITE_PUSHER_APP_CLUSTER=mt1
-
+composer install --no-dev --optimize-autoloader
 ```
 
-### 4. Run Development Server
-``` bash
+* **Permissions:**
 
-npm run dev
-The app will be available at http://localhost:5173.
-
+```bash
+chmod -R 775 storage bootstrap/cache
 ```
 
+* **Nginx:** Point the root to `/public`
+* **Queue Worker:** Use Supervisor for real-time events
 
-## 🏗 Project Structure
-
-``` bash
-
-src/
-├── api/            # Axios instances and API service functions
-├── app/            # Main application pages (Next.js/Router style organization)
-│   ├── (auth)/     # Login & Authentication pages
-│   ├── (waiter)/   # Waiter specific views
-│   ├── (kitchen)/  # KDS specific views
-│   └── (cashier)/  # Cashier specific views
-├── components/     # Reusable UI components (Buttons, Inputs, etc.)
-│   └── ui/         # Shadcn UI primitives
-├── hooks/          # Custom React hooks (useAuth, useCart)
-├── layouts/        # Main layout wrappers (PosLayout, AuthLayout)
-├── lib/            # Utilities (Echo, cn helper, etc.)
-└── types/          # TypeScript interfaces
-
+```ini
+[program:tapla-worker]
+command=php /var/www/tapla-api/artisan queue:work --tries=3
+autostart=true
+autorestart=true
+user=www-data
 ```
 
-<!-- ## 🤝 Contributing
-Contributions are welcome! Please follow these steps:
+* **SSL:** Secure API using Let's Encrypt (Certbot)
 
-Fork the project.
+---
 
-Create your feature branch (git checkout -b feature/AmazingFeature).
+### Part B: Frontend Deployment (Vercel / Netlify / Static)
 
-Commit your changes (git commit -m 'Add some AmazingFeature').
+```bash
+npm run build
+```
 
-Push to the branch (git push origin feature/AmazingFeature).
+**Vercel (Recommended):**
 
-Open a Pull Request. -->
+* Connect GitHub repo
+* Build Command: `npm run build`
+* Output Directory: `dist`
+* Env Vars: `VITE_API_BASE_URL=https://api.tapla.com/api`
 
-<!-- ## 📄 License
-Distributed under the MIT License. See LICENSE for more information. -->
+**SPA Routing (Nginx):**
+
+```nginx
+location / {
+    try_files $uri $uri/ /index.html;
+}
+```
+
+---
+
+### Part C: Connecting Them (CORS)
+
+Ensure allowed origins include your frontend domain.
+
+```php
+'paths' => ['api/*', 'sanctum/csrf-cookie'],
+'allowed_methods' => ['*'],
+'allowed_origins' => ['https://app.tapla.com', 'http://localhost:5173'],
+```
+
+---
+
+## 📡 WebSocket Architecture
+
+1. **Trigger:** Laravel fires an event (e.g., `OrderCreated`)
+2. **Broadcast:** Payload is sent to Pusher
+3. **Listen:** React subscribes via `laravel-echo`
+4. **Sync:** UI updates instantly via React Query cache invalidation
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+
+```bash
+git checkout -b feature/AmazingFeature
+```
+
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
 
 <br /> <div align="center"> <p>Built by the [Arden BOUET](https://github.com/Arden28)</p> </div>
