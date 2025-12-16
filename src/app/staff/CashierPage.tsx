@@ -20,7 +20,8 @@ import {
   CalendarDays,
   Banknote,
   Wallet,
-  Receipt
+  Receipt,
+  Utensils
 } from "lucide-react"
 import { cn, formatMoney, getTimeDiff } from "@/lib/utils"
 
@@ -51,6 +52,7 @@ import { useThemeToggle } from "@/layouts/PosLayout"
 // Page Components
 import PosTables from "../pos/PosTables"
 import { updateStaffStatus } from "@/api/staff"
+import { createTransaction, fetchTransactions, type TransactionPayload } from "@/api/transaction"
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -63,8 +65,10 @@ type CashierTask = {
   time: string
   amount: number
   priority: "high" | "medium"
-  refId: number
-  order: Order
+//   refId: number
+  // order: Order
+  // Changed: We now hold an array of orders for this session
+  orders: Order[]
 }
 
 /* -------------------------------------------------------------------------- */
@@ -143,102 +147,177 @@ export default function CashierPage() {
       }
     }
   
-  // -- Data Fetching & Logic --
-  const refreshData = React.useCallback(async () => {
+// 1. Logic to Group Orders by Session or Table
+const refreshData = React.useCallback(async () => {
     if (!isOnline) return
-        try {
-                
-        const filters: { status?: OrderStatusValue; per_page?: number } = {
-            per_page: 100,
-        }
-        if (statusFilter !== "all") {
-            filters.status = statusFilter
-        }
-                
-        const { items } = await fetchOrders(filters)
-        const allOrders = items || []
+    try {
+        const filters: { status?: OrderStatusValue; per_page?: number } = { per_page: 100 }
+        if (statusFilter !== "all") filters.status = statusFilter
+        
+        
+        // Parallel Fetch: Get Orders (for To Collect) AND Transactions (for Collected)
+        const [ordersRes, transactions] = await Promise.all([
+            fetchOrders(filters),
+            fetchTransactions({ per_page: 100 }) // Fetch today's transactions
+        ])
+        
+        const allOrders = ordersRes.items || []
 
-        // 1. Calculate Stats
+        // Stats Calculation (Same as before)
         const completedOrders = allOrders.filter(o => o.status === 'completed')
         const unpaidOrders = allOrders.filter(o => o.status !== 'cancelled' && o.status !== 'completed' && o.payment_status === 'unpaid')
-        
-        const collected = completedOrders.reduce((acc, o) => acc + o.total, 0)
-        const toCollect = unpaidOrders.reduce((acc, o) => acc + o.total, 0)
 
+        // Collected: Sum of TODAY'S TRANSACTIONS (Actual money in drawer)
+        // This is now accurate per the controller logic (user specific)
+        const collected = transactions.reduce((acc, t) => acc + Number(t.amount), 0)
+        
+        const toCollect = unpaidOrders.reduce((acc, o) => acc + o.total, 0)
         setDailyStats({ count: completedOrders.length, collected, toCollect })
 
-        // 2. Build Payment Tasks (Feed)
-        const newTasks: CashierTask[] = []
-        
-        allOrders.forEach(order => {
-            // Condition: Not cancelled, not completed, and UNPAID
-            if (order.status !== 'cancelled' && order.status !== 'completed' && order.payment_status === 'unpaid') {
-                
-                // Priority logic: Served orders are waiting to leave (High priority)
-                const isPriority = order.status === 'served' || order.status === 'ready'
+        // --- GROUPING LOGIC START ---
+        const sessions: Record<string, Order[]> = {}
 
-                newTasks.push({
-                    id: `pay-${order.id}`,
-                    title: `Table ${order.table?.name || 'Takeout'}`,
-                    subtitle: `Order #${order.id} • ${order.items?.length || 0} Items`,
-                    time: getTimeDiff(order.opened_at),
-                    amount: order.total,
-                    priority: isPriority ? 'high' : 'medium',
-                    refId: order.id,
-                    order: order
-                })
+        unpaidOrders.forEach(order => {
+            // Group Key Priority: Table Session ID -> Table ID -> Order ID (Takeout)
+            let key = `order-${order.id}`
+            if (order.table_session_id) {
+                key = `session-${order.table_session_id}`
+            } else if (order.table) {
+                key = `table-${order.table.id}`
+            }
+
+            if (!sessions[key]) sessions[key] = []
+            sessions[key].push(order)
+        })
+
+        const newTasks: CashierTask[] = Object.entries(sessions).map(([key, groupOrders]) => {
+            // Determine representative info from the group
+            const firstOrder = groupOrders[0]
+            const totalAmount = groupOrders.reduce((sum, o) => sum + o.total, 0)
+            const totalItems = groupOrders.reduce((sum, o) => sum + (o.items?.length || 0), 0)
+            
+            // Priority: If ANY order in the group is served/ready, the whole table is priority
+            const isPriority = groupOrders.some(o => o.status === 'served' || o.status === 'ready')
+            
+            // Find the earliest opened time
+            const earliestTime = groupOrders.reduce((earliest, o) => {
+                return new Date(o.opened_at) < new Date(earliest) ? o.opened_at : earliest
+            }, firstOrder.opened_at)
+
+            const title = firstOrder.table 
+                ? `Table ${firstOrder.table.name}` 
+                : (firstOrder.client?.name || 'Takeout')
+
+            return {
+                id: key,
+                title: title,
+                subtitle: `${groupOrders.length} Order${groupOrders.length > 1 ? 's' : ''} • ${totalItems} Items`,
+                time: getTimeDiff(earliestTime),
+                amount: totalAmount,
+                priority: isPriority ? 'high' : 'medium',
+                orders: groupOrders
             }
         })
-        
-        // Sort: High priority first, then oldest first
-        setTasks(newTasks.sort((a,b) => {
-            if (a.priority === b.priority) return 0 // Keep stable sort or use time
-            return a.priority === 'high' ? -1 : 1
-        }))
+        // --- GROUPING LOGIC END ---
 
-        } catch (e) { console.error("Refresh Error:", e) }
-  }, [isOnline, statusFilter])
+        setTasks(newTasks.sort((a,b) => a.priority === 'high' ? -1 : 1))
 
-  // -- Realtime Subscription --
-  React.useEffect(() => {
-    let unsubscribe = () => {}
+    } catch (e) { console.error("Refresh Error:", e) }
+}, [isOnline, statusFilter])
 
-    if (isOnline) {
-      toast.success("Register Open", { description: "Ready to process transactions." })
-      refreshData()
+    // -- Realtime Subscription --
+    React.useEffect(() => {
+        let unsubscribe = () => {}
 
-      // Subscribe to all updates to catch status changes
-      unsubscribe = subscribeToKitchen(1, { // Assuming restaurantId 1 for now
-        onNewOrder: () => refreshData(),
-        onOrderStatusUpdated: (id, status) => {
-            if (status === 'served') toast("New Bill to Pay", { icon: <Banknote className="h-4 w-4 text-green-500" /> })
+        if (isOnline) {
+            toast.success("Register Open", { description: "Ready to process transactions." })
             refreshData()
-        },
-        onItemStatusUpdated: () => refreshData()
-      })
-      setIsConnected(true)
-    } else {
-      setTasks([])
-      setIsConnected(false)
-    }
-    return () => { unsubscribe(); setIsConnected(false) }
-  }, [isOnline, refreshData])
+
+            // Subscribe to all updates
+            unsubscribe = subscribeToKitchen(1, { // Assuming restaurantId 1 for now
+                
+                onNewOrder: (order) => {
+                    // 1. Play Sound
+                    playSound('new')
+                    
+                    // 2. Notification
+                    const tableName = order.table?.name || "Takeout"
+                    sendNotification("New Order Incoming", `Table ${tableName} just placed an order.`)
+                    
+                    // 3. Refresh Data
+                    refreshData()
+                },
+
+                onOrderStatusUpdated: (id, status) => {
+                    // Only notify on relevant status changes to avoid noise
+                    if (status === 'served' || status === 'ready') {
+                        playSound('ready')
+                        sendNotification("Order Update", `Order #${id} is now ${status}.`)
+                        
+                        if (status === 'served') {
+                            toast("Bill Ready to Pay", { 
+                                description: `Order #${id} has been served.`,
+                                icon: <Banknote className="h-4 w-4 text-green-500" /> 
+                            })
+                        }
+                    }
+                    refreshData()
+                },
+
+                onItemStatusUpdated: (itemId, status) => {
+                    // Optional: Play a softer sound or just refresh
+                    // playSound('ready') 
+                    refreshData()
+                }
+            })
+            
+            setIsConnected(true)
+        } else {
+            setTasks([])
+            setIsConnected(false)
+        }
+        return () => { unsubscribe(); setIsConnected(false) }
+    }, [isOnline, refreshData])
 
   // -- Handlers --
   const handleTaskAction = (task: CashierTask) => {
       setSelectedPaymentTask(task)
   }
 
-  const handlePaymentComplete = async (task: CashierTask) => {
-      try {
-        await updateOrderStatus(task.refId, { status: 'completed' })
-        toast.success("Transaction Approved", { description: `Order #${task.refId} closed successfully.` })
-        setSelectedPaymentTask(null)
-        refreshData()
-      } catch (e) {
-        toast.error("Transaction Failed", { description: "Could not close order." })
-      }
-  }
+    // 2. Updated Payment Handler (Bulk Close)
+    const handlePaymentComplete = async (task: CashierTask, method: string = 'cash') => {
+        try {
+            const mainOrder = task.orders[0]
+            const sessionId = mainOrder?.table_session_id
+            
+            // 1. Prepare Payload
+            const payload: TransactionPayload = {
+                amount: task.amount,
+                payment_method: method,
+                // If it's a table session, pass the ID. 
+                // If it's a takeout (no session), pass the array of order IDs.
+                table_session_id: sessionId || null, 
+                order_ids: !sessionId ? task.orders.map(o => o.id) : undefined
+            }
+
+            // 2. Hit Endpoint
+            await createTransaction(payload)
+            
+            // 3. UI Feedback
+            toast.success("Payment Successful", { 
+                description: sessionId 
+                    ? `Session #${sessionId} cleared via ${method}.`
+                    : `Orders cleared via ${method}.`,
+                icon: <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            })
+            
+            setSelectedPaymentTask(null)
+            refreshData()
+        } catch (e) {
+            console.error(e)
+            toast.error("Transaction Failed", { description: "Could not process payment." })
+        }
+    }
 
   const handleLogout = async () => {
       await logout()
@@ -251,7 +330,7 @@ export default function CashierPage() {
   if (selectedPaymentTask) {
     return (
       <OrderDetailView 
-        order={selectedPaymentTask.order}
+        orders={selectedPaymentTask.orders} // Changed from 'order' to 'orders'
         onBack={() => setSelectedPaymentTask(null)}
         actionNode={
             <Button 
@@ -592,6 +671,8 @@ function PaymentFeed({ tasks, onAction }: { tasks: CashierTask[], onAction: (t: 
 
 function PaymentCard({ task, onAction, index }: { task: CashierTask, onAction: (t: CashierTask) => void, index: number }) {
     const isPriority = task.priority === 'high'
+    // Extract table ID for display, or show Icon for takeout
+    const tableId = task.orders[0]?.table?.id
 
     return (
         <div 
@@ -607,12 +688,18 @@ function PaymentCard({ task, onAction, index }: { task: CashierTask, onAction: (
                     <div className={cn("h-11 w-11 rounded-lg flex items-center justify-center font-bold text-lg border bg-muted/20",
                         isPriority ? "text-emerald-600 border-emerald-500/20 bg-emerald-500/5" : "text-foreground border-border"
                     )}>
-                        {task.order.table?.id || '#'}
+                        {tableId || <Users className="h-5 w-5 opacity-70" />}
                     </div>
                     <div>
                         <h4 className="font-bold text-[15px] leading-tight text-foreground">{task.title}</h4>
                         <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground font-mono">
-                            <span className="bg-muted px-1.5 rounded-sm">#{task.refId}</span>
+                            {/* Show individual Order IDs if grouped */}
+                            <div className="flex -space-x-1">
+                                {task.orders.slice(0, 3).map(o => (
+                                     <span key={o.id} className="bg-muted px-1.5 rounded-sm border border-background ring-2 ring-background text-[10px]">#{o.id}</span>
+                                ))}
+                                {task.orders.length > 3 && <span className="pl-2">+{task.orders.length - 3}</span>}
+                            </div>
                             <span>•</span>
                             <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {task.time}</span>
                         </div>
@@ -620,7 +707,7 @@ function PaymentCard({ task, onAction, index }: { task: CashierTask, onAction: (
                 </div>
             </div>
 
-            {/* Jagged Line Separator */}
+            {/* Separator */}
             <div className="relative my-2 pl-1.5">
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 -left-1.5 w-3 h-3 rounded-full bg-muted/10 border-r border-border z-20" />
                 <div className="border-t-2 border-dashed border-border/60 w-full" />
@@ -628,13 +715,11 @@ function PaymentCard({ task, onAction, index }: { task: CashierTask, onAction: (
             </div>
 
             <div className="px-4 pb-4 pl-5">
-                <div className="flex justify-between items-end mb-1">
-                    <span className="text-sm text-muted-foreground">Total Due</span>
+                <div className="flex justify-between items-end mb-3">
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Total Bill</span>
                     <span className="text-xl font-extrabold text-foreground tracking-tight">{formatMoney(task.amount)}</span>
                 </div>
-            </div>
-
-            <div className="px-4 pb-4 pt-0 pl-5">
+                
                 <Button 
                     onClick={() => onAction(task)} 
                     className={cn("w-full font-semibold shadow-sm h-11 rounded-lg text-sm", 
@@ -642,83 +727,123 @@ function PaymentCard({ task, onAction, index }: { task: CashierTask, onAction: (
                         "bg-secondary text-white hover:bg-secondary/80 border border-border"
                     )}
                 >
-                    Process Payment <ArrowRight className="ml-auto h-4 w-4 opacity-50" />
+                    Review & Pay <ArrowRight className="ml-auto h-4 w-4 opacity-50" />
                 </Button>
             </div>
         </div>
     )
 }
 
+type OrderDetailViewProps = {
+    order?: Order // Keep for history view compatibility
+    orders?: Order[] // New prop for Session view
+    onBack: () => void
+    actionNode?: React.ReactNode
+}
 
-function OrderDetailView({ order, onBack, actionNode }: { order: Order, onBack: () => void, actionNode?: React.ReactNode }) {
-    const tax = (order.subtotal || 0) * 0.10
-    const total = order.total
+function OrderDetailView({ order, orders, onBack, actionNode }: OrderDetailViewProps) {
+    // Normalization: Ensure we have an array to work with
+    const orderList = orders || (order ? [order] : [])
+    const mainOrder = orderList[0]
+
+    // Calculate Grand Totals
+    const grandSubtotal = orderList.reduce((acc, o) => acc + (o.subtotal || 0), 0)
+    const grandTax = grandSubtotal * 0.10 // Assuming 10% tax logic
+    const grandTotal = orderList.reduce((acc, o) => acc + o.total, 0)
+
+    if (!mainOrder) return null
 
     return (
         <div className="flex flex-col h-full w-full bg-card animate-in slide-in-from-right duration-300">
-            <div className="flex-none h-16 flex items-center justify-between px-4 border-b border-border bg-card z-20">
+            {/* Header */}
+            <div className="flex-none h-16 flex items-center justify-between px-4  bg-card z-20">
                 <div className="flex items-center gap-3">
-                    <Button variant="ghost" size="icon" onClick={onBack} className="-ml-2 md:hidden">
-                        <ChevronLeft className="h-6 w-6" />
+                    <Button variant="ghost" size="sm" onClick={onBack} className="text-muted-foreground hover:text-foreground gap-1 -ml-2">
+                        <ChevronLeft className="h-4 w-4" /> Back
                     </Button>
                     <div className="flex flex-col">
                         <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-bold text-card-foreground">Order #{order.id}</h2>
-                            <StatusBadge status={order.status} />
+                            <h2 className="text-lg font-bold text-card-foreground">
+                                {mainOrder.table ? mainOrder.table.name : "Takeout Order"}
+                            </h2>
+                            {orderList.length === 1 && <StatusBadge status={mainOrder.status} />}
                         </div>
                         <div className="text-xs text-muted-foreground flex items-center gap-2">
-                            <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {order.table?.name || 'Table'}</span>
+                            <span className="flex items-center gap-1"><Users className="h-3 w-3" /> 1</span>
                             <span>•</span>
-                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {getTimeDiff(order.opened_at)}</span>
+                            <span>{orderList.length} Order(s) Combined</span>
                         </div>
                     </div>
                 </div>
             </div>
-
+            
+            {/* List Content */}
             <div className="flex-1 overflow-hidden bg-card relative">
                 <ScrollArea className="h-full">
-                    <div className="pb-24">
-                        <div className="flex flex-col">
-                            {order.items?.map((item) => (
-                                <div key={item.id} className="flex items-stretch justify-between min-h-[76px] border-b border-border px-4 py-2 relative group">
-                                    <div className="flex flex-col justify-center gap-1 flex-1">
-                                        <span className="text-sm font-bold leading-snug text-card-foreground">
-                                            {item.product?.name || item.name}
+                    <div className="pb-24 pt-2">
+                        {orderList.map((ord) => (
+                            <div key={ord.id} className="mb-4 last:mb-0">
+                                
+                                {/* Order Header Separator */}
+                                {orderList.length > 1 && (
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="h-px flex-1 bg-border/60" />
+                                        <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                                            Order #{ord.id} • {formatTime(ord.opened_at)}
                                         </span>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                            <div className="flex items-center bg-muted/50 rounded-md px-1.5 py-0.5 border border-border">
-                                                <span className="font-mono font-bold text-foreground">{item.quantity}</span>
+                                        <div className="h-px flex-1 bg-border/60" />
+                                    </div>
+                                )}
+
+                                {/* Items */}
+                                <div className="flex flex-col">
+                                    {ord.items?.map((item) => (
+                                        <div key={item.id} className="flex items-stretch justify-between min-h-[60px]  hover:bg-muted/40 rounded-lg transition-colors px-4 py-3 relative">
+                                            <div className="flex flex-col justify-center gap-1 flex-1">
+                                                <span className="text-sm font-medium leading-snug text-card-foreground">
+                                                    {item.product?.name || item.name}
+                                                </span>
+                                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                    <div className="flex items-center bg-muted/50 rounded-md px-1.5 py-0.5 border border-border">
+                                                        <span className="font-mono font-bold text-foreground">{item.quantity}</span>
+                                                    </div>
+                                                    <span>x</span>
+                                                    <span>{formatMoney(item.unit_price)}</span>
+                                                    {item.notes && <span className="text-amber-600 ml-1 italic">({item.notes})</span>}
+                                                </div>
                                             </div>
-                                            <span>x</span>
-                                            <span>{formatMoney(item.unit_price)}</span>
-                                            {item.notes && <span className="text-amber-600 ml-1 italic">({item.notes})</span>}
+                                            <div className="flex flex-col items-end justify-center">
+                                                <span className="text-sm font-bold tabular-nums text-foreground">
+                                                    {formatMoney(item.total_price)}
+                                                </span>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="flex flex-col items-end justify-center">
-                                        <span className="text-sm font-extrabold tabular-nums text-foreground">
-                                            {formatMoney(item.total_price)}
-                                        </span>
-                                    </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
+                            </div>
+                        ))}
                     </div>
+                    
                 </ScrollArea>
             </div>
 
-            <div className="shrink-0 flex flex-col border-t border-border bg-card pb-[safe]">
+            {/* Footer Totals */}
+            
+            {/* Dashed Divider */}
+            <div className="my-8 border-t-2 border-dashed border-border/60" />
+            <div className="shrink-0 flex flex-col bg-card pb-[safe]">
                 <div className="px-5 py-3 bg-muted/20 border-b border-border space-y-1">
-                    <div className="flex justify-between text-xs font-medium text-muted-foreground">
-                        <span>Subtotal</span>
-                        <span>{formatMoney(order.subtotal)}</span>
+                    <div className="flex justify-between text-sm font-medium text-muted-foreground">
+                        <span>Subtotal ({orderList.length} orders)</span>
+                        <span>{formatMoney(grandSubtotal)}</span>
                     </div>
-                    <div className="flex justify-between text-xs font-medium text-muted-foreground">
+                    <div className="flex justify-between text-sm font-medium text-muted-foreground">
                         <span>Tax (10%)</span>
-                        <span>{formatMoney(tax)}</span>
+                        <span>{formatMoney(grandTax)}</span>
                     </div>
                     <div className="flex justify-between items-end mt-2">
-                        <span className="text-sm font-bold text-card-foreground">Total Due</span>
-                        <span className="text-xl font-extrabold tracking-tight text-primary">{formatMoney(total)}</span>
+                        <span className="text-sm font-bold text-card-foreground">Grand Total</span>
+                        <span className="text-xl font-extrabold tracking-tight text-primary">{formatMoney(grandTotal)}</span>
                     </div>
                 </div>
                 {actionNode && (

@@ -15,7 +15,8 @@ import {
     Trash2,
     RefreshCw,
     Sparkles,
-    ArrowRight
+    ArrowRight,
+    LogOut
 } from "lucide-react"
 
 import { cn, formatMoney } from "@/lib/utils"
@@ -38,7 +39,7 @@ import { Separator } from "@/components/ui/separator"
 import type { FloorPlan } from "@/api/floor"
 import { fetchFloorPlans } from "@/api/floor"
 import type { Table, TableStatus } from "@/api/table"
-import { fetchTables } from "@/api/table"
+import { closeTableSession, fetchTables } from "@/api/table"
 import { fetchOrders, type Order } from "@/api/order"
 import apiService from "@/api/apiService" // Importing to handle table status updates
 import { toast } from "sonner"
@@ -390,6 +391,7 @@ function RealisticTableWithChairs({
                     navigate={navigate}
                     onMarkClean={handleMarkCleaned}
                     onMarkDirty={handleMarkNeedsCleaning}
+                    refreshData={refreshData}
                 />
             </PopoverContent>
         </Popover>
@@ -398,12 +400,13 @@ function RealisticTableWithChairs({
 
 function TableDetailsPopoverContent({ 
     table, 
-    tableActiveOrders, // Now receives an array
-    activeOrdersTotal, // Now receives the total sum
+    tableActiveOrders, 
+    activeOrdersTotal,
     statusStyles, 
     navigate,
     onMarkClean,
-    onMarkDirty
+    onMarkDirty,
+    refreshData // Add refreshData to props to trigger reload after closing
 }: { 
     table: Table, 
     tableActiveOrders: Order[], 
@@ -411,34 +414,49 @@ function TableDetailsPopoverContent({
     statusStyles: any, 
     navigate: any,
     onMarkClean: () => void,
-    onMarkDirty: () => void
+    onMarkDirty: () => void,
+    refreshData?: () => void
 }) {
     
     // Logic extraction
-    const hasActiveOrders = tableActiveOrders.length > 0 // TRUE if there's an ongoing service/bill
-    const criticalOrder = tableActiveOrders[0] // Used for elapsed time and order ID display
+    const hasActiveOrders = tableActiveOrders.length > 0 
+    const criticalOrder = tableActiveOrders[0] 
     const elapsed = useElapsedTimer(criticalOrder?.opened_at)
-    const guests = 1 // Placeholder until guest tracking is implemented 
     
     // Status Checks
-    // Check if ANY active order is served or completed (for post-dining actions)
-    const isServedOrCompleted = tableActiveOrders.some(o => o.status === 'served' || o.status === 'completed')
     const isNeedsCleaning = table.status === 'needs_cleaning'
     const isReserved = table.status === 'reserved'
-    
-    // NEW CHECK: Detect the Mismatch State
     const isOccupiedButEmpty = table.status === 'occupied' && !hasActiveOrders;
 
-    // Nav Handlers
-    const handleStartOrder = () => navigate(`/waiter`)
-    const handleOpenOrder = () => navigate(`/waiter`) 
+    // HANDLER: Finish Service / Close Session
+    const handleFinishService = async () => {
+        if (!criticalOrder?.table_session_id) {
+            toast.error("No active session found for this table.");
+            return;
+        }
+
+        if (!window.confirm(`Finish service for ${table.name}? This will close the session and mark table for cleaning.`)) {
+            return;
+        }
+
+        try {
+            await closeTableSession(table.code, criticalOrder.table_session_id);
+            toast.success("Service finished. Table marked for cleaning.");
+            if (refreshData) refreshData();
+        } catch (e: any) {
+            console.error(e);
+            // Handle specific backend errors (like unpaid bills)
+            const msg = e.response?.data?.message || "Could not close session.";
+            toast.error(msg);
+        }
+    }
     
-    // NEW HANDLER: To force the table back to 'free' when a mismatch is detected
+    // NEW HANDLER: Force Reset (Mismatch State)
     const handleFreeTableMismatch = async () => {
         try {
             await updateTableStatus(table.id, "free");
             toast.success(`${table.name} status reset to Free.`);
-            onMarkClean(); // Refreshes data and updates UI
+            onMarkClean(); 
         } catch (e) {
             toast.error("Failed to reset table status.");
         }
@@ -452,36 +470,25 @@ function TableDetailsPopoverContent({
                 <div className="flex flex-col">
                     <h4 className="text-sm font-bold text-foreground">{table.name}</h4>
                     <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
-                        {hasActiveOrders ? `Order Count: ${tableActiveOrders.length}` : `Code: ${table.code}`}
+                        {hasActiveOrders ? `Session #${criticalOrder?.table_session_id}` : `Code: ${table.code}`}
                     </span>
                 </div>
                 <Badge variant="outline" className={cn("border-0 font-semibold capitalize", statusStyles.badgeCls)}>
                     {statusStyles.icon && <statusStyles.icon className="w-3 h-3 mr-1.5" />}
-                    {hasActiveOrders ? criticalOrder?.status : table.status.replace("_", " ")}
+                    {hasActiveOrders ? (criticalOrder?.status || 'Active') : table.status.replace("_", " ")}
                 </Badge>
             </div>
 
             {/* 2. Quick Stats Grid - ONLY IF ACTIVE ORDERS EXIST */}
             {hasActiveOrders && (
                 <div className="p-3">
-                    <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-2 border border-dashed border-border">
-                        <div className="flex flex-col items-center justify-center gap-1">
-                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
-                                <Users className="w-3 h-3" /> Guests
-                            </div>
-                            <span className="text-sm font-semibold text-foreground">{guests}</span>
-                        </div>
-                        
-                        <Separator orientation="vertical" className="h-8 bg-border" />
-
+                    <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/40 p-2 border border-dashed border-border">
                         <div className="flex flex-col items-center justify-center gap-1">
                             <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
                                 <Clock className="w-3 h-3" /> Time
                             </div>
                             <span className="text-sm font-semibold text-foreground">{elapsed}</span>
                         </div>
-
-                        <Separator orientation="vertical" className="h-8 bg-border" />
 
                         <div className="flex flex-col items-center justify-center gap-1">
                             <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-bold">
@@ -498,7 +505,19 @@ function TableDetailsPopoverContent({
             {/* 3. Action Buttons */}
             <div className={cn("p-3 flex flex-col gap-2", !hasActiveOrders && "pt-0")}>
                 
-                {/* STATE: MISMATCH (Occupied but no active orders) */}
+                {/* A. TABLE IS ACTIVE: Close Session Button */}
+                {hasActiveOrders && (
+                    <Button 
+                        onClick={handleFinishService} 
+                        className="w-full h-10 shadow-sm border border-border/50" 
+                        variant="secondary"
+                    >
+                        <LogOut className="w-3.5 h-3.5 mr-2 opacity-70" />
+                        Finish Service
+                    </Button>
+                )}
+
+                {/* B. MISMATCH STATE: Occupied but no active orders */}
                 {isOccupiedButEmpty && (
                     <Button 
                         onClick={handleFreeTableMismatch} 
@@ -506,11 +525,11 @@ function TableDetailsPopoverContent({
                         variant="destructive"
                     >
                         <Trash2 className="w-3.5 h-3.5 mr-2" />
-                        Force Close / Reset Table
+                        Force Reset Table
                     </Button>
                 )}
                 
-                {/* STATE: NEEDS CLEANING */}
+                {/* C. NEEDS CLEANING STATE */}
                 {isNeedsCleaning && !hasActiveOrders && !isReserved && (
                     <Button onClick={onMarkClean} className="w-full border-border bg-background hover:bg-accent text-foreground h-9 text-xs sm:text-sm" variant="outline">
                         <Sparkles className="w-3.5 h-3.5 mr-2 text-blue-500" />
@@ -518,15 +537,12 @@ function TableDetailsPopoverContent({
                     </Button>
                 )}
 
-                {/* STATE: FREE */}
+                {/* D. FREE STATE: No button needed (Orders start elsewhere) */}
                 {!hasActiveOrders && !isNeedsCleaning && !isOccupiedButEmpty && !isReserved && (
-                    <Button onClick={handleStartOrder} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm h-9 text-xs sm:text-sm">
-                        <Play className="w-3.5 h-3.5 mr-2 fill-current" />
-                        Start New Order
-                    </Button>
+                    <div className="py-2 text-center text-xs text-muted-foreground italic">
+                        Table is free. Assign via Order screen.
+                    </div>
                 )}
-
-                {/* STATE: OCCUPIED (Active Order) */}
             </div>
         </div>
     )

@@ -243,7 +243,7 @@ export default function WaiterPage() {
 
       unsubscribe = subscribeToKitchen(1, {
         onNewOrder: (kdsOrder) => {
-            console.log("SOCKET: New Order", kdsOrder)
+            // console.log("SOCKET: New Order", kdsOrder)
             // Play Sound & Notify
             playSound('new')
             sendNotification("New Order", `Table ${kdsOrder.table?.name} placed an order.`)

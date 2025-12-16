@@ -6,7 +6,8 @@ import {
   ShoppingBag, Minus, Plus, ChevronRight, ChevronLeft, Search, 
   Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt,
   RotateCcw, CreditCard, Clock,
-  Check
+  Check,
+  LogOut
 } from "lucide-react"
 
 import { cn, formatMoney } from "@/lib/utils"
@@ -626,6 +627,41 @@ export default function PortalPage() {
                 </div>
             </motion.div>
         )}
+        
+        {/* Scenario D: Close Session / Leave Table */}
+        {/* Shows on Bottom Left - Mirrors the Track Order button */}
+        {activeSessionData && !isOrderPaid && !isTrackerOpen && activeSessionData.total_due <= 0 && (
+          <motion.div 
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.5, opacity: 0 }}
+            className={cn(
+                "fixed left-4 sm:left-6 z-40 transition-all duration-500 ease-in-out",
+                // Dynamic Vertical Position: Move up if the main Cart button is visible
+                cartCount > 0 ? "bottom-24" : "bottom-6"
+            )}
+          >
+              <Button 
+                onClick={async () => {
+                    if(!window.confirm("Are you sure you want to leave this table?")) return;
+                    try {
+                        await closePortalSession(tableCode!, session!.active_session_id!)
+                        setSession(prev => prev ? { ...prev, session_status: 'closed' } : null)
+                        toast.success("Session closed. Hope to see you again!")
+                    } catch(e: any) {
+                        toast.error(e.response?.data?.message || "Could not close session.")
+                    }
+                }}
+                className="h-14 w-14 sm:w-auto sm:px-6 rounded-full bg-background/80 backdrop-blur-md border border-border/50 shadow-md hover:bg-destructive/5 hover:border-destructive/30 hover:text-destructive hover:scale-105 text-muted-foreground transition-all flex items-center justify-center gap-2.5 group"
+              >
+                <div className="relative">
+                    <LogOut className="h-5 w-5 group-hover:-translate-x-0.5 transition-transform duration-300" />
+                </div>
+                <span className="hidden sm:inline font-bold text-sm tracking-wide">Leave Table</span>
+              </Button>
+          </motion.div>
+        )}
+
       </AnimatePresence>
 
       {/* 7. Product Detail Drawer */}

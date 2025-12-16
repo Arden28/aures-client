@@ -5,7 +5,7 @@ import apiService, { type ApiResult } from "@/api/apiService"
 
 export type OrderStatusValue =
   | "pending"
-  | 'preparing'
+  | "preparing"
   | "ready"
   | "served"
   | "completed"
@@ -52,14 +52,20 @@ export type TransactionMini = {
 
 export type Order = {
   id: number
+  
+  // Relationships
   restaurant?: MiniRef | null
   table?: MiniRef | null
   client?: MiniRef | null
   waiter?: MiniRef | null
+  
+  // Critical for Session Grouping in Cashier
+  table_session_id?: number | null 
 
   status: OrderStatusValue
   source: string
 
+  // Financials
   subtotal: number
   tax_amount: number | null
   service_charge: number | null
@@ -68,10 +74,12 @@ export type Order = {
   paid_amount: number
   payment_status: PaymentStatusValue
 
+  // Timestamps
   updated_at: string | null
-  opened_at: string | null
+  opened_at: string
   closed_at: string | null
 
+  // Nested Data
   items?: OrderItemMini[]
   transactions?: TransactionMini[]
 }
@@ -79,7 +87,7 @@ export type Order = {
 /* ------------ Filters & payloads ---------------- */
 
 export type OrderFilters = {
-  status?: OrderStatusValue
+  status?: OrderStatusValue | OrderStatusValue[] // Allow array for multiple status filtering
   page?: number
   per_page?: number
 }
@@ -95,7 +103,7 @@ export type OrderUpdatePayload = {
 }
 
 /**
- * Mirrors StoreOrderRequest on the backend.
+ * Mirrors StoreOrderRequest item structure.
  */
 export type OrderCreateItemPayload = {
   product_id: number
@@ -103,6 +111,9 @@ export type OrderCreateItemPayload = {
   notes?: string | null
 }
 
+/**
+ * Mirrors StoreOrderRequest on the backend.
+ */
 export type OrderCreatePayload = {
   table_id?: number | null
   client_id?: number | null
@@ -163,7 +174,7 @@ function normalizeOrderIndex(payload: OrderIndexResponse) {
 }
 
 /**
- * Laravel OrderResource + normal order models.
+ * Unwraps Laravel API Resources.
  * Works with:
  * - { data: { ...order } }
  * - { message: "...", data: { ...order } }
@@ -192,13 +203,11 @@ export async function fetchOrder(id: number) {
 }
 
 export async function createOrder(body: OrderCreatePayload) {
-  // backend returns { message, data: OrderResource }
   const res = await apiService.post<any, OrderCreatePayload>("/v1/orders", body)
   return unwrapOrder(res.data)
 }
 
 export async function updateOrder(id: number, body: OrderUpdatePayload) {
-  // backend returns { message, data: OrderResource }
   const res = await apiService.put<any, OrderUpdatePayload>(
     `/v1/orders/${id}`,
     body

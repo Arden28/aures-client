@@ -71,3 +71,8 @@ export async function updateTableStatus(id: number, status: TableStatus) {
   )
   return res.data
 }
+
+export async function closeTableSession(tableCode: string, sessionId: number) {
+  await apiService.post(`/v1/tables/${tableCode}/session/${sessionId}/close`)
+}
+
