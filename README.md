@@ -26,6 +26,9 @@
     <a href="https://vitejs.dev/">
       <img src="https://img.shields.io/badge/Vite-B73C92?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
     </a>
+    <a href="https://laravel.com/">
+      <img src="https://img.shields.io/badge/Vite-B73C92?style=for-the-badge&logo=laravel&logoColor=white" alt="Laravel" />
+    </a>
     <a href="https://pusher.com/">
       <img src="https://img.shields.io/badge/Pusher-Realtime-20c997?style=for-the-badge&logo=pusher&logoColor=white" alt="Pusher" />
     </a>
