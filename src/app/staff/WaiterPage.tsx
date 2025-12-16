@@ -253,7 +253,7 @@ export default function WaiterPage() {
             refreshData()
         },
         onOrderStatusUpdated: (id, status, tableId) => {
-            console.log("SOCKET: Status Update", id, status)
+            // console.log("SOCKET: Status Update", id, status)
             
             if (status === 'ready') {
                 playSound('ready')

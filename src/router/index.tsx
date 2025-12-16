@@ -30,12 +30,6 @@ const Clients = React.lazy(() => import("@/app/dashboard/Clients"))
 const Staff = React.lazy(() => import("@/app/dashboard/Staff"))
 const Settings = React.lazy(() => import("@/app/dashboard/Settings"))
 
-// POS
-const PosTables = React.lazy(() => import("@/app/pos/PosTables"))
-const PosBilling = React.lazy(() => import("@/app/pos/PosBilling"))
-const PosRegister = React.lazy(() => import("@/app/pos/PosRegister"))
-const KDS = React.lazy(() => import("@/app/pos/KDS"))
-const PosOrders = React.lazy(() => import("@/app/pos/PosOrders"))
 const WaiterPage = React.lazy(() => import("@/app/staff/WaiterPage"))
 const CashierPage = React.lazy(() => import("@/app/staff/CashierPage"))
 const KitchenPage = React.lazy(() => import("@/app/staff/KitchenPage"))
@@ -158,7 +152,7 @@ export const router = createBrowserRouter([
                 path: "kitchen",
                 element: <RequireRole allowed={["kitchen"]} />,
                 children: [
-                  { index: true, element: withSuspense(<KDS />) },
+                  { index: true, element: withSuspense(<KitchenPage />) },
                 ],
               },
             ],

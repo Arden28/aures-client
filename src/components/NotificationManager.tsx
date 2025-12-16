@@ -55,7 +55,7 @@ async function requestNotificationPermission(): Promise<void> {
                 applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
             });
 
-            console.log('User is subscribed:', subscription);
+            // console.log('User is subscribed:', subscription);
 
             // 4. Send subscription data to your backend for storage
             // The subscription object is the data your server needs to send push messages

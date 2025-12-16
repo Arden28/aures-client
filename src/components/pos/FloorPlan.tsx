@@ -252,9 +252,9 @@ export function FloorPlan() {
                                                 const criticalOrderStatus = getCriticalOrderStatus(tableActiveOrders);
 
                                                 // Debug log (Optional: remove in production)
-                                                if (tableActiveOrders.length > 0) {
-                                                    console.log(`[Table ${table.name}] Orders Found:`, tableActiveOrders.length, "IDs:", tableActiveOrders);
-                                                }
+                                                // if (tableActiveOrders.length > 0) {
+                                                //     console.log(`[Table ${table.name}] Orders Found:`, tableActiveOrders.length, "IDs:", tableActiveOrders);
+                                                // }
 
                                                 //  UPDATED LOGIC END
                                                 return (

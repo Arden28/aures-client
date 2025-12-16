@@ -1,26 +1,21 @@
 "use client"
 
 import * as React from "react"
-import { useNavigate } from "react-router-dom"
 import { 
-  Bell, 
-  ChefHat, 
-  Flame, 
-  CheckCircle2, 
-  Check, 
-  AlertCircle, 
-  LogOut, 
-  Sun, 
-  Moon, 
   Clock, 
-  Wifi, 
-  WifiOff, 
-  Filter, 
-  ChevronDown, 
+  CheckCircle2, 
+  AlertCircle, 
+  MoreHorizontal, 
   RotateCcw,
-  Utensils,
   GripVertical,
-  MoreHorizontal
+  Flame,
+  Check,
+  Filter,
+  ChevronDown,
+  // Added icons needed for the dropdown
+  Sun,
+  Moon,
+  LogOut,
 } from "lucide-react"
 
 // --- Mobile Drag & Drop Polyfill ---
@@ -40,8 +35,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel
 } from "@/components/ui/dropdown-menu"
-import { Switch } from "@/components/ui/switch"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+// Added Avatar for the user icon
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar" 
 import { toast } from "sonner"
 
 import { 
@@ -50,24 +45,25 @@ import {
   type KDSOrder, 
   type OrderStatusValue 
 } from "@/api/kds"
-import useAuth from "@/hooks/useAuth"
 import { useThemeToggle } from "@/layouts/PosLayout"
+import useAuth from "@/hooks/useAuth"
+import { useNavigate } from "react-router-dom"
 
 /* -------------------------------------------------------------------------- */
-/* Config                                                                     */
+/* Config                                                                      */
 /* -------------------------------------------------------------------------- */
 
 const KDS_COLUMNS: { id: OrderStatusValue | 'preparing'; label: string; color: string; bg: string; icon: any }[] = [
   { id: "pending", label: "To Do", color: "text-zinc-500", bg: "bg-zinc-500/10", icon: AlertCircle },
   { id: 'preparing', label: "Cooking", color: "text-orange-500", bg: "bg-orange-500/10", icon: Flame },
   { id: "ready", label: "Ready to Serve", color: "text-emerald-500", bg: "bg-emerald-500/10", icon: CheckCircle2 },
-  { id: "served", label: "Completed", color: "text-blue-500", bg: "bg-blue-500/10", icon: Check },
+  // { id: "served", label: "Completed", color: "text-blue-500", bg: "bg-blue-500/10", icon: Check },
 ]
 
 type TimeFilter = 'all' | '30m' | '60m'
 
 /* -------------------------------------------------------------------------- */
-/* Audio Helper                                                               */
+/* Audio Helper                                                                */
 /* -------------------------------------------------------------------------- */
 
 const playAudio = (type: 'new' | 'move') => {
@@ -78,21 +74,18 @@ const playAudio = (type: 'new' | 'move') => {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Main Component                                                             */
+/* Main Component                                                              */
 /* -------------------------------------------------------------------------- */
 
 export default function KitchenPage() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
-  const { theme, toggleTheme } = useThemeToggle()
+    const { user, logout } = useAuth()
+    const { theme, toggleTheme } = useThemeToggle()
 
   const [orders, setOrders] = React.useState<KDSOrder[]>([])
   const [draggedOrderId, setDraggedOrderId] = React.useState<number | null>(null)
   const [activeDropZone, setActiveDropZone] = React.useState<string | null>(null)
   const [timeFilter, setTimeFilter] = React.useState<TimeFilter>('all')
-  
-  const [isOnline, setIsOnline] = React.useState(true) // Default to Online for Kitchen
-  const [isConnected, setIsConnected] = React.useState(false) // Connection status
 
   // Refs to access state inside intervals without dependencies
   const ordersRef = React.useRef(orders)
@@ -101,8 +94,8 @@ export default function KitchenPage() {
   const restaurantId = 1 
   
   // Safe User Data
-  const userName = (user as any)?.name || "Chef"
-  const userRole = (user as any)?.role || "Kitchen"
+  const userName = user?.name
+  const userRole = user?.role
 
   // Sync ref with state
   React.useEffect(() => {
@@ -127,7 +120,6 @@ export default function KitchenPage() {
 
   // -- 1. Data Loading (Initial)
   const loadOrders = React.useCallback(async (isSilent = false) => {
-    if (!isOnline) return []
     try {
       const data = await fetchKDSOrders(restaurantId)
       const freshOrders = Array.isArray(data) ? data : []
@@ -136,23 +128,19 @@ export default function KitchenPage() {
         setOrders(freshOrders)
         toast.success("Board updated")
       }
-      setIsConnected(true)
       return freshOrders
     } catch (error) {
       if (!isSilent) toast.error("Connection error")
-      setIsConnected(false)
       return []
     }
-  }, [restaurantId, isOnline])
+  }, [restaurantId])
 
   React.useEffect(() => {
-    if(isOnline) loadOrders(false) // Initial load
-  }, [loadOrders, isOnline])
+    loadOrders(false) // Initial load
+  }, [loadOrders])
 
   // -- 2. Automation: Polling for New Orders
   React.useEffect(() => {
-    if (!isOnline) return
-
     const POLL_INTERVAL = 10000 // 10 Seconds
 
     const checkForNewOrders = async () => {
@@ -176,17 +164,15 @@ export default function KitchenPage() {
         if (JSON.stringify(freshOrders) !== JSON.stringify(currentOrders)) {
             setOrders(freshOrders)
         }
-        setIsConnected(true)
 
       } catch (e) {
         console.error("Auto-check failed", e)
-        setIsConnected(false)
       }
     }
 
     const intervalId = setInterval(checkForNewOrders, POLL_INTERVAL)
     return () => clearInterval(intervalId)
-  }, [restaurantId, isOnline])
+  }, [restaurantId])
 
 
   // -- 3. Logic: Filter Orders for Display
@@ -293,133 +279,97 @@ export default function KitchenPage() {
           default: return 'All Active';
       }
   }
-
+  
   const handleLogout = async () => {
       await logout()
       navigate("/login")
   }
 
+
   return (
     <div className="flex flex-col h-screen w-full bg-zinc-50/50 dark:bg-zinc-950 text-foreground overflow-hidden font-sans">
       
       {/* Header */}
-      <header className="flex-none pt-4 pb-3 px-4 sm:px-6 sticky top-0 z-20 bg-background/80 backdrop-blur-xl border-b border-zinc-200 dark:border-zinc-800">
-          <div className="flex justify-between items-center mb-3">
-               <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 bg-zinc-900 dark:bg-zinc-100 rounded-xl flex items-center justify-center shadow-sm">
-                    <Utensils className="h-5 w-5 text-white dark:text-zinc-900" />
-                  </div>
-                  <div>
-                      <h1 className="text-xl font-bold tracking-tight text-foreground">Kitchen Display</h1>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="relative flex h-2 w-2">
-                          {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>}
-                          <span className={cn("relative inline-flex rounded-full h-2 w-2", isOnline ? "bg-emerald-500" : "bg-muted-foreground/30")}></span>
-                        </span>
-                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                            {isOnline ? (isConnected ? "Live System" : "Connecting...") : "Offline Mode"}
-                        </span>
-                      </div>
-                  </div>
-               </div>
-               
-               <div className="flex items-center gap-3">
-                  {/* Filter Dropdown */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-9 text-xs font-medium border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center gap-2">
-                            <Filter className="h-3.5 w-3.5 text-zinc-500" />
-                            <span>{getFilterLabel()}</span>
-                            <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuLabel className="text-xs text-zinc-500 font-normal">Filter by Time</DropdownMenuLabel>
-                        <DropdownMenuItem onClick={() => setTimeFilter('all')}>
-                            Show All Active
-                            {timeFilter === 'all' && <Check className="ml-auto h-3 w-3" />}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => setTimeFilter('30m')}>
-                            Last 30 Minutes
-                            {timeFilter === '30m' && <Check className="ml-auto h-3 w-3" />}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setTimeFilter('60m')}>
-                            Last 1 Hour
-                            {timeFilter === '60m' && <Check className="ml-auto h-3 w-3" />}
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+      <header className="flex-none h-14 px-4 md:px-6 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md flex items-center justify-between z-20">
+        <div className="flex items-center gap-3">
+           <img src="/images/logo.png" alt="" className="h-[20px]" />
+           <span className="font-semibold text-sm tracking-tight text-zinc-700 dark:text-zinc-200 hidden sm:inline">
+             Kitchen Display
+           </span>
+           <div className="h-4 w-px bg-zinc-300 dark:bg-zinc-700 mx-1 hidden sm:block" />
+           <span className="text-xs text-zinc-500 font-mono">
+             {filteredOrders.filter(o => o.status !== 'served' && o.status !== 'cancelled').length} ACTIVE
+           </span>
+        </div>
 
-                  {/* Refresh Button */}
-                  <Button variant="ghost" size="icon" onClick={() => loadOrders(false)} className="h-9 w-9 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm hover:bg-zinc-50">
-                    <RotateCcw className="h-4 w-4 text-zinc-600" /> 
-                  </Button>
+        <div className="flex items-center gap-2 md:gap-3">
+          
+          {/* Modern Select Filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 text-xs font-medium border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center gap-2">
+                    <Filter className="h-3 w-3 text-zinc-500" />
+                    <span>{getFilterLabel()}</span>
+                    <ChevronDown className="h-3 w-3 text-zinc-400" />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuLabel className="text-xs text-zinc-500 font-normal">Filter by Time</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => setTimeFilter('all')}>
+                    Show All Active
+                    {timeFilter === 'all' && <Check className="ml-auto h-3 w-3" />}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setTimeFilter('30m')}>
+                    Last 30 Minutes
+                    {timeFilter === '30m' && <Check className="ml-auto h-3 w-3" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setTimeFilter('60m')}>
+                    Last 1 Hour
+                    {timeFilter === '60m' && <Check className="ml-auto h-3 w-3" />}
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-                  <div className="h-6 w-px bg-zinc-200 dark:bg-zinc-800 mx-1" />
+          <Button variant="ghost" size="sm" onClick={() => loadOrders(false)} className="h-8 w-8 p-0 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm hover:bg-zinc-50">
+            <RotateCcw className="h-3.5 w-3.5 text-zinc-600" /> 
+          </Button>
 
-                  {/* Toggle Shift */}
-                  <div className={cn(
-                      "flex items-center gap-2 p-1 pl-3 pr-1 rounded-full border transition-all duration-300",
-                      isOnline ? "bg-emerald-500/10 border-emerald-500/20" : "bg-muted/50 border-border"
-                  )}>
-                      <span className={cn("text-[10px] font-bold uppercase", isOnline ? "text-emerald-600" : "text-muted-foreground")}>
-                          {isOnline ? "On Duty" : "Off Duty"}
-                      </span>
-                      <Switch 
-                        checked={isOnline} 
-                        onCheckedChange={setIsOnline} 
-                        className="data-[state=checked]:bg-emerald-600 scale-90" 
-                      />
-                  </div>
-                  
-                  {/* User Profile */}
-                  <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                          <Avatar className="h-9 w-9 border border-border cursor-pointer hover:ring-2 hover:ring-primary/20 transition-all">
-                              <AvatarImage src="https://github.com/shadcn.png" />
-                              <AvatarFallback>{userName.charAt(0)}</AvatarFallback>
-                          </Avatar>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-56 p-2">
-                          <DropdownMenuLabel>
-                              <div className="flex flex-col">
-                                  <span className="text-sm font-medium">{userName}</span>
-                                  <span className="text-xs text-muted-foreground capitalize">{userRole}</span>
-                              </div>
-                          </DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={toggleTheme}>
-                              {theme === 'light' ? <Moon className="mr-2 h-4 w-4" /> : <Sun className="mr-2 h-4 w-4" />}
-                              <span>Theme</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
-                              <LogOut className="mr-2 h-4 w-4" />
-                              <span>Log out</span>
-                          </DropdownMenuItem>
-                      </DropdownMenuContent>
-                  </DropdownMenu>
-               </div>
-          </div>
+          {/* USER DROPDOWN */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Avatar className="h-8 w-8 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:ring-2 hover:ring-zinc-400/20 transition-all">
+                    <AvatarImage src="https://github.com/shadcn.png" />
+                    <AvatarFallback>{userName?.charAt(0)}</AvatarFallback>
+                </Avatar>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 p-2">
+                <DropdownMenuLabel>
+                    <div className="flex flex-col">
+                        <span className="text-sm font-medium">{userName}</span>
+                        <span className="text-xs text-muted-foreground capitalize">{userRole}</span>
+                    </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {/* Theme Toggle */}
+                <DropdownMenuItem onClick={toggleTheme}>
+                    {theme === 'light' ? <Moon className="mr-2 h-4 w-4" /> : <Sun className="mr-2 h-4 w-4" />}
+                    <span>Theme: {theme === 'light' ? 'Light' : 'Dark'}</span>
+                </DropdownMenuItem>
+                {/* Logout */}
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Log out</span>
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {/* END USER DROPDOWN */}
+
+        </div>
       </header>
 
       {/* Board Area */}
-      <div className="flex-1 p-2 md:p-4 overflow-y-auto md:overflow-hidden bg-zinc-50 dark:bg-black/20 relative">
-        {!isOnline && (
-            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/60 backdrop-blur-sm">
-                <div className="flex flex-col items-center p-8 bg-card border border-border rounded-2xl shadow-xl">
-                    <WifiOff className="h-12 w-12 text-muted-foreground mb-4" />
-                    <h3 className="text-xl font-bold">Kitchen System Offline</h3>
-                    <p className="text-muted-foreground mt-2 mb-6 text-center max-w-xs">
-                        Enable "On Duty" mode to start receiving tickets from the dining room.
-                    </p>
-                    <Button onClick={() => setIsOnline(true)} className="w-full">
-                        Start Service
-                    </Button>
-                </div>
-            </div>
-        )}
-
+      <div className="flex-1 p-2 md:p-4 overflow-y-auto md:overflow-hidden bg-zinc-50 dark:bg-black/20">
         <div className="h-auto md:h-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {KDS_COLUMNS.map((col) => (
             <KDSColumn
@@ -442,7 +392,7 @@ export default function KitchenPage() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Sub-Components                                                             */
+/* Sub-Components                                                              */
 /* -------------------------------------------------------------------------- */
 
 type KDSColumnProps = {
@@ -474,8 +424,8 @@ function KDSColumn({ config, orders, isOver, draggedOrderId, onDragOver, onDrop,
       <div className="flex-none px-3 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
            <Badge variant="outline" className={cn("border-0 font-medium px-2 py-1 rounded-md bg-white dark:bg-zinc-800 shadow-sm", config.color)}>
-              <Icon className="h-3.5 w-3.5 mr-1.5" />
-              {config.label}
+             <Icon className="h-3.5 w-3.5 mr-1.5" />
+             {config.label}
            </Badge>
            <span className="text-xs text-zinc-400 font-mono font-medium">
              {orders.length}
@@ -545,7 +495,7 @@ function KDSTicket({ order, isDragging, onMove, onDragStart, onDragEnd }: { orde
              )}
            </div>
            <span className="text-[10px] text-zinc-400 font-medium uppercase tracking-wide">
-              {order.waiter?.name || "Server"}
+             {order.waiter?.name || "Server"}
            </span>
         </div>
         
@@ -584,29 +534,32 @@ function KDSTicket({ order, isDragging, onMove, onDragStart, onDragEnd }: { orde
       </div>
 
       <div className="px-3 py-2 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
-         {/* MOBILE FIX: Touch-none allows drag polyfill to work */}
-         <span className="text-[10px] text-zinc-400 flex items-center gap-1 cursor-grab touch-none p-2 -ml-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <GripVertical className="h-3 w-3" /> Drag
-         </span>
-         
-         <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-               <Button variant="ghost" className="h-6 w-6 p-0 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full">
-                  <MoreHorizontal className="h-4 w-4 text-zinc-500" />
-               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40 font-medium">
-               <DropdownMenuItem onClick={() => onMove(order.id, 'preparing')}>
-                   <Flame className="h-3.5 w-3.5 mr-2 text-orange-500" /> Cooking
-               </DropdownMenuItem>
-               <DropdownMenuItem onClick={() => onMove(order.id, "ready")}>
-                   <CheckCircle2 className="h-3.5 w-3.5 mr-2 text-emerald-500" /> Ready
-               </DropdownMenuItem>
-               <DropdownMenuItem onClick={() => onMove(order.id, "served")}>
-                   <Check className="h-3.5 w-3.5 mr-2 text-blue-500" /> Served
-               </DropdownMenuItem>
-            </DropdownMenuContent>
-         </DropdownMenu>
+          {/* MOBILE FIX: We add touch-none here. 
+              This tells the browser: "If the user touches this specific icon, DO NOT SCROLL." 
+              This allows the drag polyfill to pick up the event immediately.
+          */}
+          <span className="text-[10px] text-zinc-400 flex items-center gap-1 cursor-grab touch-none p-2 -ml-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+             <GripVertical className="h-3 w-3" /> Drag
+          </span>
+          
+          <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="h-6 w-6 p-0 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full">
+                      <MoreHorizontal className="h-4 w-4 text-zinc-500" />
+                  </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40 font-medium">
+                 <DropdownMenuItem onClick={() => onMove(order.id, 'preparing')}>
+                     <Flame className="h-3.5 w-3.5 mr-2 text-orange-500" /> Cooking
+                 </DropdownMenuItem>
+                 <DropdownMenuItem onClick={() => onMove(order.id, "ready")}>
+                     <CheckCircle2 className="h-3.5 w-3.5 mr-2 text-emerald-500" /> Ready
+                 </DropdownMenuItem>
+                 <DropdownMenuItem onClick={() => onMove(order.id, "served")}>
+                     <Check className="h-3.5 w-3.5 mr-2 text-blue-500" /> Served
+                 </DropdownMenuItem>
+              </DropdownMenuContent>
+          </DropdownMenu>
       </div>
     </div>
   )
@@ -618,16 +571,28 @@ function useElapsedTimer(openedAt: string | null) {
 
   React.useEffect(() => {
     if (!openedAt) return
-    const start = new Date(openedAt).getTime()
+
+    // FIX: Force UTC interpretation if timezone is missing
+    let cleanDateStr = openedAt
+    if (!openedAt.endsWith("Z") && !openedAt.includes("+")) {
+      cleanDateStr += "Z"
+    }
+
+    const start = new Date(cleanDateStr).getTime()
+
     const update = () => {
       const now = new Date().getTime()
-      const diff = Math.max(0, now - start)
+      // Math.max(0, ...) prevents negative time if local clock is slightly behind
+      const diff = Math.max(0, now - start) 
+
       const m = Math.floor(diff / 60000)
       const s = Math.floor((diff % 60000) / 1000)
+
       setMinutes(m)
       setTime(`${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`)
     }
-    update()
+
+    update() // Run immediately to avoid 1s delay
     const interval = setInterval(update, 1000)
     return () => clearInterval(interval)
   }, [openedAt])

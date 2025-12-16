@@ -50,7 +50,6 @@ import useAuth from "@/hooks/useAuth"
 import { useThemeToggle } from "@/layouts/PosLayout"
 
 // Page Components
-import PosTables from "../pos/PosTables"
 import { updateStaffStatus } from "@/api/staff"
 import { createTransaction, fetchTransactions, type TransactionPayload } from "@/api/transaction"
 
@@ -443,9 +442,6 @@ const refreshData = React.useCallback(async () => {
                   )}
               </TabsContent>
 
-              <TabsContent value="tables" className="h-full mt-0 data-[state=inactive]:hidden">
-                    <div className="h-full pb-20"><PosTables /></div>
-              </TabsContent>
               <TabsContent value="orders" className="h-full mt-0 data-[state=inactive]:hidden">
                     <CashierHistorySection />
               </TabsContent>

@@ -84,13 +84,13 @@ export function subscribeToKitchen(restaurantId: number, callbacks: KDSCallbacks
     }
 
     const channelName = `restaurant.${restaurantId}.kitchen`
-    console.log(`🔌 Subscribing to KDS Channel: ${channelName}`)
+    // console.log(`🔌 Subscribing to KDS Channel: ${channelName}`)
 
     const channel = echo.private(channelName)
 
     // 1. New Order Placed
     channel.listen('.order.created', (e: any) => {
-        console.log('🎟️ New Order Event:', e)
+        // console.log('🎟️ New Order Event:', e)
         if (e.order) {
             callbacks.onNewOrder(e.order)
         } else {
@@ -101,7 +101,7 @@ export function subscribeToKitchen(restaurantId: number, callbacks: KDSCallbacks
     // 2. Order Moved (Updated for specific payload)
     channel.listen('.order.status.updated', (e: any) => {
         // Payload: { order_id: 53, table_id: 12, old_status: 'pending', new_status: 'preparing' }
-        console.log('📋 Order Status Update:', e)
+        // console.log('📋 Order Status Update:', e)
         
         if (e.order_id && e.new_status) {
             callbacks.onOrderStatusUpdated(e.order_id, e.new_status, e.table_id)
@@ -110,14 +110,14 @@ export function subscribeToKitchen(restaurantId: number, callbacks: KDSCallbacks
 
     // 3. Item Updated
     channel.listen('.order.item.status.updated', (e: any) => {
-        console.log('🍔 Item Status Update:', e)
+        // console.log('🍔 Item Status Update:', e)
         if (e.order_id && e.item_id && e.new_status) {
             callbacks.onItemStatusUpdated(e.order_id, e.item_id, e.new_status)
         }
     })
 
     return () => {
-        console.log(`🔌 Unsubscribing from ${channelName}`)
+        // console.log(`🔌 Unsubscribing from ${channelName}`)
         channel.stopListening('.order.created')
         channel.stopListening('.order.status.updated')
         channel.stopListening('.order.item.status.updated')
