@@ -560,16 +560,21 @@ function MetricCard({ label, value, currency, icon: Icon, trend, trendUp, alert,
 }
 
 function StatusRow({ label, count, total, colorClass }: any) {
-    const pct = total > 0 ? (count / total) * 100 : 0
-    return (
-        <div className="space-y-1.5">
-            <div className="flex justify-between items-center text-xs">
-                <span className="font-medium">{label}</span>
-                <span className="text-muted-foreground">{count}</span>
-            </div>
-            <Progress value={pct} className="h-1.5" indicatorColor={colorClass.replace("bg-", "")} />
-        </div>
-    )
+  const pct = total > 0 ? (count / total) * 100 : 0
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex justify-between items-center text-xs">
+        <span className="font-medium">{label}</span>
+        <span className="text-muted-foreground">{count}</span>
+      </div>
+
+      <Progress
+        value={pct}
+        className={`h-1.5 [&>div]:${colorClass}`}
+      />
+    </div>
+  )
 }
 
 function FinanceStat({ label, value, color }: any) {
