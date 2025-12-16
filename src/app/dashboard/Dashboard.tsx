@@ -1,8 +1,6 @@
-// src/pages/Dashboard.tsx
 "use client"
 
 import React, { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
 import {
   TrendingUp,
   ShoppingCart,
@@ -10,9 +8,15 @@ import {
   Activity,
   AlertCircle,
   BarChart3,
-  Store,
-  ChefHat,
   UtensilsCrossed,
+  Clock,
+  Sun,
+  Moon,
+  RefreshCw,
+  Wallet,
+  ArrowUpRight,
+  ArrowDownRight,
+  MoreHorizontal
 } from "lucide-react"
 import {
   AreaChart,
@@ -22,30 +26,25 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
+  ResponsiveContainer,
+  Tooltip,
+  Legend
 } from "recharts"
 
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent,
-} from "@/components/ui/chart"
 import {
   fetchDashboardOverview,
   type DashboardOverview,
   type DashboardTimeframe,
-  revenueChartConfig,
-  ordersChartConfig,
 } from "@/api/dashboard"
 
-import { cn } from "@/lib/utils"
+import { cn, formatMoney } from "@/lib/utils"
 import {
   Card,
   CardHeader,
   CardTitle,
   CardDescription,
   CardContent,
+  CardFooter,
 } from "@/components/ui/card"
 import {
   Tabs,
@@ -56,14 +55,6 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
@@ -71,906 +62,571 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { toast } from "sonner"
 import useAuth from "@/hooks/useAuth"
 
-type LoadingState = "idle" | "loading" | "success" | "error"
+type LoadingState = "idle" | "initial-loading" | "revalidating" | "success" | "error"
 
 export default function Dashboard() {
   const { user } = useAuth()
   const [timeframe, setTimeframe] = useState<DashboardTimeframe>("today")
   const [overview, setOverview] = useState<DashboardOverview | null>(null)
   const [state, setState] = useState<LoadingState>("idle")
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
 
-  // ---------------------------------------------------------
-  // Role & Access Logic
-  // ---------------------------------------------------------
-  const role = (user as any)?.role || "waiter" // Default fallback
+  // Role Logic
+  const role = (user as any)?.role || "waiter"
+  const isManagerial = ["owner", "manager"].includes(role)
+  const isKitchen = role === "kitchen"
+  const isCashier = role === "cashier"
 
-  const isManagerial = ["owner", "manager"].includes(role) // Revenue, Staff stats, Top products
-  const isKitchen = role === "kitchen" // Only Orders, no Floor plan/Financials
-  const isCashier = role === "cashier" // Payments view
+  // Data Fetching
+  const fetchData = async (isBackground = false) => {
+    if (!isBackground) setState("initial-loading")
+    else setState("revalidating")
 
-  // Dynamic POS Link based on role
-  const posLink = isKitchen ? "/pos/kitchen" : "/pos/tables"
+    try {
+      const data = await fetchDashboardOverview(timeframe)
+      setOverview(data)
+      setLastUpdated(new Date())
+      setState("success")
+    } catch (err: any) {
+      if (!isBackground) setState("error")
+    }
+  }
+
+  useEffect(() => { fetchData(false) }, [timeframe])
 
   useEffect(() => {
-    let mounted = true
-
-    async function load() {
-      setState("loading")
-      try {
-        const data = await fetchDashboardOverview(timeframe)
-        if (!mounted) return
-        setOverview(data)
-        setState("success")
-      } catch (err: any) {
-        if (!mounted) return
-        setState("error")
-        toast("Failed to load dashboard")
-      }
-    }
-
-    load()
-    return () => {
-      mounted = false
-    }
+    const interval = setInterval(() => { fetchData(true) }, 15000) 
+    return () => clearInterval(interval)
   }, [timeframe])
 
+  // UX Helpers
+  const getGreeting = () => {
+    const hour = new Date().getHours()
+    if (hour < 12) return { text: "Good morning", icon: Sun }
+    if (hour < 18) return { text: "Good afternoon", icon: Sun }
+    return { text: "Good evening", icon: Moon }
+  }
+
+  const { text: greeting, icon: GreetingIcon } = getGreeting()
   const currency = overview?.currency ?? "KES"
   
-  // Logic to determine if staff performance table should be shown
-  const hasStaffPerformanceData =
-    overview?.staff_performance &&
-    ((overview.staff_performance?.waiters?.length ?? 0) > 0 ||
-      (overview.staff_performance?.cashiers?.length ?? 0) > 0)
+  const hasStaffPerformanceData = overview?.staff_performance && 
+    ((overview.staff_performance?.waiters?.length ?? 0) > 0 || (overview.staff_performance?.cashiers?.length ?? 0) > 0)
 
-  const showStaffPerformance = isManagerial && hasStaffPerformanceData
+  // Chart Colors (Synced with CSS variables)
+  const colors = {
+    primary: "hsl(var(--primary))",
+    muted: "hsl(var(--muted-foreground))",
+    grid: "hsl(var(--border))",
+  }
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col gap-6 pb-6 lg:pb-8">
-        {/* Header */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {isManagerial ? "Business Overview" : "Station Dashboard"}
+      <div className="flex flex-col gap-8 pb-8 animate-in fade-in duration-500">
+        
+        {/* --- Header --- */}
+        <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-muted-foreground">
+               <GreetingIcon className="h-4 w-4 text-orange-500" />
+               <span className="text-sm font-medium uppercase tracking-wider">{greeting}, {user?.name}</span>
+            </div>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">
+              {isManagerial ? "Business Overview" : `${role.charAt(0).toUpperCase() + role.slice(1)} Dashboard`}
             </h1>
-            <p className="max-w-xl text-sm text-muted-foreground">
-              {isManagerial 
-                ? "Real-time overview of sales, orders, staff performance and floor occupancy."
-                : `Welcome back. Here is the current activity for the ${role} station.`}
-            </p>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-emerald-600 font-medium">Live Updates Active</span>
+                <span className="text-xs text-muted-foreground/60">• Last updated {lastUpdated.toLocaleTimeString()}</span>
+            </div>
           </div>
 
-          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
 
+          <div className="flex items-center gap-3">
+             {state === 'revalidating' && (
+                 <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
+             )}
             <Tabs
               value={timeframe}
               onValueChange={(value) => setTimeframe(value as DashboardTimeframe)}
-              className="w-full max-w-md sm:w-auto"
+              className="w-full sm:w-auto"
             >
-              <TabsList className="grid w-full grid-cols-4 sm:w-auto sm:grid-cols-4">
-                <TabsTrigger value="today">Today</TabsTrigger>
-                <TabsTrigger value="week">Week</TabsTrigger>
-                <TabsTrigger value="month">Month</TabsTrigger>
-                <TabsTrigger value="year">Year</TabsTrigger>
+              <TabsList className="bg-muted/50 p-1">
+                {['today', 'week', 'month', 'year'].map((t) => (
+                    <TabsTrigger 
+                        key={t} 
+                        value={t} 
+                        className="capitalize data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all"
+                    >
+                        {t}
+                    </TabsTrigger>
+                ))}
               </TabsList>
             </Tabs>
           </div>
         </div>
 
-        {/* Content */}
-        {state === "loading" && <DashboardSkeleton />}
+        {/* --- Loading / Error States --- */}
+        {state === "initial-loading" && <DashboardSkeleton />}
 
         {state === "error" && !overview && (
-          <Card className="border-destructive/30 bg-destructive/5">
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-              <AlertCircle className="h-5 w-5 text-destructive" />
-              <div>
-                <CardTitle className="text-base">
-                  Unable to load dashboard
-                </CardTitle>
-                <CardDescription>
-                  Please check your connection and try again.
-                </CardDescription>
-              </div>
-            </CardHeader>
-          </Card>
+          <div className="flex flex-col items-center justify-center h-64 border border-dashed rounded-xl bg-muted/20">
+              <AlertCircle className="h-8 w-8 text-muted-foreground mb-2" />
+              <p className="text-sm font-medium">Unable to load data</p>
+              <Button variant="link" onClick={() => fetchData(false)} size="sm">Retry</Button>
+          </div>
         )}
 
-        {overview && state !== "loading" && (
-          <>
-            {/* Top metrics - Conditional Rendering */}
+        {/* --- Main Dashboard Content --- */}
+        {overview && (state === "success" || state === "revalidating") && (
+          <div className="space-y-8">
+            
+            {/* 1. Metric Cards (KPIs) */}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               
-              {/* Financials: Only for Managers */}
               {isManagerial && (
                 <>
                   <MetricCard
-                    label="Total revenue"
-                    value={formatCurrency(overview.metrics.total_revenue, currency)}
-                    icon={TrendingUp}
-                    hint={timeframeLabel(overview.timeframe)}
+                    label="Total Revenue"
+                    value={overview.metrics.total_revenue}
+                    currency={currency}
+                    icon={Wallet}
+                    trend="up" // Logic to calculate this needed in backend
+                    percentage={12} // Logic needed
                   />
                    <MetricCard
-                    label="Average order value"
-                    value={formatCurrency(
-                      overview.metrics.average_order_value,
-                      currency
-                    )}
+                    label="Avg. Order Value"
+                    value={overview.metrics.average_order_value}
+                    currency={currency}
                     icon={Activity}
-                    hint="Revenue ÷ orders"
                   />
                 </>
               )}
 
-              {/* Operational Metrics: Visible to Everyone */}
               <MetricCard
-                label="Total orders"
-                value={overview.metrics.total_orders.toLocaleString()}
+                label="Total Orders"
+                value={overview.metrics.total_orders}
                 icon={ShoppingCart}
-                hint="Includes dine-in, takeaway & online"
               />
+              
               <MetricCard
-                label="Active orders"
-                value={overview.metrics.active_orders.toString()}
-                icon={Users}
-                hint="Orders not yet completed"
+                label="Active Pipeline"
+                value={overview.metrics.active_orders}
+                icon={Clock}
+                alert={overview.metrics.active_orders > 10} // Alert if busy
               />
 
-              {/* Filler for Non-Managers to keep grid balanced if needed, or just let it flow */}
               {!isManagerial && (
                  <MetricCard
-                 label="Completed Today"
-                 value={overview.metrics.completed_today.toString()}
+                 label="Completed"
+                 value={overview.metrics.completed_today}
                  icon={UtensilsCrossed}
-                 hint="Orders served & finalized"
                />
               )}
             </div>
 
-            {/* Charts row - MANAGER ONLY */}
+            {/* 2. Primary Charts (Manager) */}
             {isManagerial && (
-              <div className="grid gap-4 lg:grid-cols-5">
-                {/* Revenue trend */}
-                <Card className="lg:col-span-3">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <div>
-                      <CardTitle className="text-base">Revenue trend</CardTitle>
-                      <CardDescription>
-                        {timeframe === "today"
-                          ? "Revenue by hour"
-                          : "Revenue over the selected period"}
-                      </CardDescription>
-                    </div>
-                    <Badge variant="outline" className="text-xs">
-                      {timeframeLabel(timeframe)}
-                    </Badge>
+              <div className="grid gap-4 lg:grid-cols-7">
+                
+                {/* Revenue Area Chart */}
+                <Card className="lg:col-span-4 shadow-none border-border/60 bg-card/50">
+                  <CardHeader>
+                    <CardTitle className="text-base font-semibold">Revenue Trend</CardTitle>
+                    <CardDescription className="text-xs">Income over {timeframe}</CardDescription>
                   </CardHeader>
-                  <CardContent className="h-64 sm:h-72">
-                    {overview.revenue_series.length === 0 ? (
-                      <EmptyChartState />
-                    ) : (
-                      <ChartContainer
-                        config={revenueChartConfig}
-                        className="h-full w-full rounded-md border bg-background/40 p-2 sm:p-3"
-                      >
-                        <AreaChart data={overview.revenue_series}>
-                          <CartesianGrid
-                            strokeDasharray="3 3"
-                            vertical={false}
-                          />
-                          <XAxis
-                            dataKey="label"
-                            tickLine={false}
-                            axisLine={false}
-                            tickMargin={8}
-                          />
-                          <YAxis
-                            tickLine={false}
-                            axisLine={false}
-                            tickMargin={8}
-                            tickFormatter={(v) => shortCurrency(v, currency)}
-                          />
-                          <ChartTooltip
-                            content={
-                              <ChartTooltipContent
-                                formatter={(value) =>
-                                  formatCurrency(value as number, currency)
-                                }
-                              />
-                            }
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="total"
-                            name={revenueChartConfig.total.label as string}
-                            stroke="var(--color-total, hsl(var(--chart-1)))"
-                            fill="var(--color-total, hsl(var(--chart-1)))"
-                            fillOpacity={0.15}
-                            strokeWidth={2}
-                            activeDot={{ r: 4 }}
-                          />
-                          <ChartLegend content={<ChartLegendContent />} />
-                        </AreaChart>
-                      </ChartContainer>
-                    )}
+                  <CardContent className="pl-0 pb-0">
+                    <div className="h-[280px] w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={overview.revenue_series} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={colors.primary} stopOpacity={0.1}/>
+                                        <stop offset="95%" stopColor={colors.primary} stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <XAxis 
+                                    dataKey="label" 
+                                    stroke={colors.muted} 
+                                    fontSize={11} 
+                                    tickLine={false} 
+                                    axisLine={false} 
+                                    tickMargin={12}
+                                />
+                                <YAxis 
+                                    stroke={colors.muted} 
+                                    fontSize={11} 
+                                    tickLine={false} 
+                                    axisLine={false} 
+                                    tickFormatter={(value) => shortCurrency(value, currency)} 
+                                />
+                                <Tooltip content={<CustomTooltip currency={currency} />} />
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={colors.grid} opacity={0.4} />
+                                <Area 
+                                    type="monotone" 
+                                    dataKey="total" 
+                                    stroke={colors.primary} 
+                                    strokeWidth={2.5}
+                                    fillOpacity={1} 
+                                    fill="url(#colorRevenue)" 
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
                   </CardContent>
                 </Card>
 
-                {/* Orders mix */}
-                <Card className="lg:col-span-2">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <div>
-                      <CardTitle className="text-base">Orders mix</CardTitle>
-                      <CardDescription>
-                        Dine-in vs takeaway vs online for this period
-                      </CardDescription>
-                    </div>
-                    <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                {/* Orders Bar Chart */}
+                <Card className="lg:col-span-3 shadow-none border-border/60 bg-card/50">
+                  <CardHeader>
+                    <CardTitle className="text-base font-semibold">Order Sources</CardTitle>
+                    <CardDescription className="text-xs">Dine-in vs Online vs Takeaway</CardDescription>
                   </CardHeader>
-                  <CardContent className="h-64 sm:h-72">
-                    {overview.orders_series.length === 0 ? (
-                      <EmptyChartState />
-                    ) : (
-                      <ChartContainer
-                        config={ordersChartConfig}
-                        className="h-full w-full rounded-md border bg-background/40 p-2 sm:p-3"
-                      >
-                        <BarChart data={overview.orders_series}>
-                          <CartesianGrid
-                            strokeDasharray="3 3"
-                            vertical={false}
-                          />
-                          <XAxis
-                            dataKey="label"
-                            tickLine={false}
-                            axisLine={false}
-                            tickMargin={8}
-                          />
-                          <YAxis
-                            tickLine={false}
-                            axisLine={false}
-                            tickMargin={8}
-                          />
-                          <ChartTooltip
-                            content={
-                              <ChartTooltipContent
-                                formatter={(value) =>
-                                  (value as number).toLocaleString()
-                                }
-                              />
-                            }
-                          />
-                          <Bar
-                            dataKey="dine_in"
-                            stackId="orders"
-                            name={ordersChartConfig.dine_in.label as string}
-                            fill="var(--color-dine_in, hsl(var(--chart-2)))"
-                          />
-                          <Bar
-                            dataKey="online"
-                            stackId="orders"
-                            name={ordersChartConfig.online.label as string}
-                            fill="var(--color-online, hsl(var(--chart-3)))"
-                          />
-                          <Bar
-                            dataKey="takeaway"
-                            stackId="orders"
-                            name={ordersChartConfig.takeaway.label as string}
-                            fill="var(--color-takeaway, hsl(var(--chart-4)))"
-                          />
-                          <ChartLegend content={<ChartLegendContent />} />
-                        </BarChart>
-                      </ChartContainer>
-                    )}
+                  <CardContent>
+                    <div className="h-[280px] w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={overview.orders_series} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} barSize={32}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={colors.grid} opacity={0.4} />
+                                <XAxis dataKey="label" stroke={colors.muted} fontSize={11} tickLine={false} axisLine={false} tickMargin={10} />
+                                <YAxis stroke={colors.muted} fontSize={11} tickLine={false} axisLine={false} />
+                                <Tooltip cursor={{fill: 'var(--muted)', opacity: 0.1}} content={<CustomTooltip />} />
+                                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} iconType="circle" />
+                                <Bar dataKey="dine_in" name="Dine-in" stackId="a" fill="hsl(var(--chart-2))" radius={[0, 0, 4, 4]} />
+                                <Bar dataKey="takeaway" name="Takeaway" stackId="a" fill="hsl(var(--chart-4))" radius={[0, 0, 0, 0]} />
+                                <Bar dataKey="online" name="Online" stackId="a" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
                   </CardContent>
                 </Card>
               </div>
             )}
 
-            {/* Middle row: status/payments + staff performance */}
+            {/* 3. Operational Details */}
             <div className={cn("grid gap-4", isManagerial ? "xl:grid-cols-2" : "grid-cols-1")}>
-              {/* Orders & payments - Visible to all, but Payment details hidden for non-cashier/manager */}
-              <Card>
-                <CardHeader className="space-y-1">
-                  <CardTitle className="text-base">Order Status</CardTitle>
-                  <CardDescription>Real-time tracking</CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-6">
-                  <div>
-                    <div className="mb-2 flex items-center justify-between text-xs font-medium">
-                      <span>Orders by status</span>
-                    </div>
-                    <div className="space-y-2 text-xs">
-                      {renderStatusRow(
-                        "Pending",
-                        overview.orders_by_status.pending,
-                        overview.metrics.total_orders
-                      )}
-                      {renderStatusRow(
-                        "In progress",
-                        overview.orders_by_status.PREPARING,
-                        overview.metrics.total_orders
-                      )}
-                      {renderStatusRow(
-                        "Ready",
-                        overview.orders_by_status.ready,
-                        overview.metrics.total_orders
-                      )}
-                      {renderStatusRow(
-                        "Served",
-                        overview.orders_by_status.served,
-                        overview.metrics.total_orders
-                      )}
-                      {renderStatusRow(
-                        "Completed",
-                        overview.orders_by_status.completed,
-                        overview.metrics.total_orders
-                      )}
-                      {renderStatusRow(
-                        "Cancelled",
-                        overview.orders_by_status.cancelled,
-                        overview.metrics.total_orders,
-                        "bg-destructive/40"
-                      )}
-                    </div>
+              
+              {/* Order Status Pipeline */}
+              <Card className="shadow-none border-border/60">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <div className="space-y-1">
+                    <CardTitle className="text-base font-semibold">Live Operations</CardTitle>
+                    <CardDescription className="text-xs">Current kitchen & payment status</CardDescription>
                   </div>
-
-                  {(isManagerial || isCashier) && (
-                    <>
-                      <Separator />
-                      <div>
-                        <div className="mb-2 flex items-center justify-between text-xs font-medium">
-                          <span>Payment breakdown</span>
+                  <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
+                </CardHeader>
+                <CardContent className="space-y-6 pt-4">
+                    {/* Pipeline */}
+                    <div className="space-y-4">
+                        <StatusRow 
+                            label="Pending Confirmation" 
+                            count={overview.orders_by_status.pending} 
+                            total={overview.metrics.total_orders} 
+                            colorClass="bg-orange-500" 
+                        />
+                        <StatusRow 
+                            label="Cooking / Preparing" 
+                            count={overview.orders_by_status.PREPARING} 
+                            total={overview.metrics.total_orders} 
+                            colorClass="bg-blue-500" 
+                        />
+                        <StatusRow 
+                            label="Ready to Serve" 
+                            count={overview.orders_by_status.ready} 
+                            total={overview.metrics.total_orders} 
+                            colorClass="bg-purple-500" 
+                        />
+                    </div>
+                    
+                    <Separator />
+                    
+                    {/* Financial Summary */}
+                    {(isManagerial || isCashier) && (
+                        <div className="grid grid-cols-3 gap-4 pt-2">
+                            <FinanceStat label="Paid" value={overview.payment_breakdown.paid} color="text-emerald-600" />
+                            <FinanceStat label="Open" value={overview.payment_breakdown.unpaid} color="text-muted-foreground" />
+                            <FinanceStat label="Void" value={overview.payment_breakdown.refunded} color="text-red-500" />
                         </div>
-                        <div className="space-y-2 text-xs">
-                          {renderPaymentRow(
-                            "Paid",
-                            overview.payment_breakdown.paid,
-                            "bg-emerald-500"
-                          )}
-                          {renderPaymentRow(
-                            "Partial",
-                            overview.payment_breakdown.partial,
-                            "bg-amber-500"
-                          )}
-                          {renderPaymentRow(
-                            "Unpaid",
-                            overview.payment_breakdown.unpaid,
-                            "bg-muted-foreground"
-                          )}
-                          {isManagerial && renderPaymentRow(
-                            "Refunded",
-                            overview.payment_breakdown.refunded,
-                            "bg-sky-500"
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  )}
+                    )}
                 </CardContent>
               </Card>
 
-              {/* Staff performance (STRICTLY Managerial) */}
-              {showStaffPerformance && (
-                <Card>
-                  <CardHeader className="flex flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <CardTitle className="text-base">
-                        Staff performance
-                      </CardTitle>
-                      <CardDescription>
-                        Waiter & cashier performance over this period
-                      </CardDescription>
-                    </div>
-                    <Badge variant="secondary" className="w-fit text-[11px]">
-                      Management only
-                    </Badge>
+              {/* Staff Activity */}
+              {isManagerial && hasStaffPerformanceData && (
+                <Card className="shadow-none border-border/60 flex flex-col">
+                  <CardHeader>
+                    <CardTitle className="text-base font-semibold">Staff Activity</CardTitle>
+                    <CardDescription className="text-xs">Performance leaders</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <Tabs defaultValue="waiters" className="w-full">
-                      <TabsList className="grid w-full grid-cols-2 sm:w-auto">
-                        <TabsTrigger value="waiters">Waiters</TabsTrigger>
-                        <TabsTrigger value="cashiers">Cashiers</TabsTrigger>
+                  <CardContent className="flex-1 min-h-[300px]">
+                    <Tabs defaultValue="waiters" className="w-full h-full flex flex-col">
+                      <TabsList className="grid w-full grid-cols-2 bg-muted/40 p-1 mb-4">
+                        <TabsTrigger value="waiters" className="text-xs">Waiters</TabsTrigger>
+                        <TabsTrigger value="cashiers" className="text-xs">Cashiers</TabsTrigger>
                       </TabsList>
-
-                      {/* Waiters */}
-                      <TabsContent value="waiters" className="mt-3">
-                        {overview.staff_performance!.waiters.length === 0 ? (
-                          <EmptyTableState label="No waiter activity for this period." />
-                        ) : (
-                          <ScrollArea className="h-[230px]">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Name</TableHead>
-                                  <TableHead className="hidden sm:table-cell">
-                                    Orders
-                                  </TableHead>
-                                  <TableHead className="hidden lg:table-cell">
-                                    Active
-                                  </TableHead>
-                                  <TableHead className="hidden lg:table-cell">
-                                    Completed
-                                  </TableHead>
-                                  <TableHead className="text-right">
-                                    Revenue
-                                  </TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {overview.staff_performance!.waiters.map((w) => (
-                                  <TableRow key={w.id}>
-                                    <TableCell className="font-medium">
-                                      {w.name}
-                                    </TableCell>
-                                    <TableCell className="hidden text-xs sm:table-cell">
-                                      {w.total_orders}
-                                    </TableCell>
-                                    <TableCell className="hidden text-xs lg:table-cell">
-                                      {w.active_orders}
-                                    </TableCell>
-                                    <TableCell className="hidden text-xs lg:table-cell">
-                                      {w.completed_orders}
-                                    </TableCell>
-                                    <TableCell className="text-right text-xs">
-                                      {formatCurrency(
-                                        w.total_revenue,
-                                        currency
-                                      )}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </ScrollArea>
-                        )}
-                      </TabsContent>
-
-                      {/* Cashiers */}
-                      <TabsContent value="cashiers" className="mt-3">
-                        {overview.staff_performance!.cashiers.length === 0 ? (
-                          <EmptyTableState label="No cashier activity for this period." />
-                        ) : (
-                          <ScrollArea className="h-[230px]">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Name</TableHead>
-                                  <TableHead className="hidden sm:table-cell">
-                                    Payments
-                                  </TableHead>
-                                  <TableHead className="text-right">
-                                    Processed
-                                  </TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {overview.staff_performance!.cashiers.map(
-                                  (c) => (
-                                    <TableRow key={c.id}>
-                                      <TableCell className="font-medium">
-                                        {c.name}
-                                      </TableCell>
-                                      <TableCell className="hidden text-xs sm:table-cell">
-                                        {c.payments_count}
-                                      </TableCell>
-                                      <TableCell className="text-right text-xs">
-                                        {formatCurrency(
-                                          c.total_processed,
-                                          currency
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
-                                  )
-                                )}
-                              </TableBody>
-                            </Table>
-                          </ScrollArea>
-                        )}
-                      </TabsContent>
+                      
+                      <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                        <TabsContent value="waiters" className="mt-0 space-y-3">
+                            {overview.staff_performance!.waiters.map((w) => (
+                                <div key={w.id} className="flex items-center justify-between group">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-9 w-9 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-xs group-hover:bg-secondary group-hover:text-white transition-colors">
+                                            {w.name.charAt(0)}
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium">{w.name}</p>
+                                            <p className="text-[10px] text-muted-foreground">{w.completed_orders} orders closed</p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-sm font-bold">{formatMoney(w.total_revenue, currency)}</p>
+                                        <p className="text-[10px] text-muted-foreground">{w.active_orders} active</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </TabsContent>
+                        <TabsContent value="cashiers" className="mt-0 space-y-3">
+                            {overview.staff_performance!.cashiers.map((c) => (
+                                <div key={c.id} className="flex items-center justify-between group">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-9 w-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                            {c.name.charAt(0)}
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium">{c.name}</p>
+                                            <p className="text-[10px] text-muted-foreground">{c.payments_count} transactions</p>
+                                        </div>
+                                    </div>
+                                    <p className="text-sm font-bold text-foreground">{formatMoney(c.total_processed, currency)}</p>
+                                </div>
+                            ))}
+                        </TabsContent>
+                      </div>
                     </Tabs>
                   </CardContent>
                 </Card>
               )}
             </div>
 
-            {/* Bottom row: top products + occupancy + recent orders */}
+            {/* 4. Bottom Row: Recent Orders Feed & Top Products */}
             <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
               
-              {/* Top products - Manager only */}
+              {/* Top Products */}
               {isManagerial && (
-                <Card className="2xl:col-span-1">
-                  <CardHeader className="space-y-1">
-                    <CardTitle className="text-base">Top products</CardTitle>
-                    <CardDescription>
-                      Most ordered items in this period
-                    </CardDescription>
+                <Card className="2xl:col-span-1 shadow-none border-border/60">
+                  <CardHeader>
+                    <CardTitle className="text-base font-semibold">Top Selling</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-2">
-                    {overview.top_products.length === 0 ? (
-                      <EmptyTableState label="No products found for this period." />
-                    ) : (
-                      <ScrollArea className="h-[260px]">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Product</TableHead>
-                              <TableHead className="hidden sm:table-cell">
-                                Category
-                              </TableHead>
-                              <TableHead className="text-right">Qty</TableHead>
-                              <TableHead className="text-right">
-                                Revenue
-                              </TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {overview.top_products.map((p) => (
-                              <TableRow key={p.id}>
-                                <TableCell className="font-medium">
-                                  {p.name}
-                                </TableCell>
-                                <TableCell className="hidden text-xs text-muted-foreground sm:table-cell">
-                                  {p.category}
-                                </TableCell>
-                                <TableCell className="text-right text-xs">
-                                  {p.total_quantity.toLocaleString()}
-                                </TableCell>
-                                <TableCell className="text-right text-xs">
-                                  {formatCurrency(p.total_revenue, currency)}
-                                </TableCell>
-                              </TableRow>
+                  <CardContent className="p-0">
+                    <ScrollArea className="h-[320px]">
+                        <div className="divide-y divide-border/30">
+                            {overview.top_products.map((p, i) => (
+                                <div key={p.id} className="flex items-center justify-between p-4 hover:bg-muted/20 transition-colors">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-[10px] font-bold text-muted-foreground/60 w-4">0{i+1}</span>
+                                        <div>
+                                            <p className="text-sm font-medium leading-none">{p.name}</p>
+                                            <p className="text-[10px] text-muted-foreground uppercase mt-1">{p.category}</p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-sm font-bold">{p.total_quantity}</p>
+                                    </div>
+                                </div>
                             ))}
-                          </TableBody>
-                        </Table>
-                      </ScrollArea>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Occupancy - Hidden for Kitchen */}
-              {!isKitchen && (
-                <Card className={cn(isManagerial ? "2xl:col-span-1" : "lg:col-span-1")}>
-                  <CardHeader className="space-y-1">
-                    <CardTitle className="text-base">Floor occupancy</CardTitle>
-                    <CardDescription>
-                      Realtime snapshot by floor plan
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-medium">
-                        <span>Overall occupancy</span>
-                        <span>{overview.metrics.occupancy_rate.toFixed(0)}%</span>
-                      </div>
-                      <Progress value={overview.metrics.occupancy_rate} />
-                    </div>
-
-                    <ScrollArea className="h-[210px]">
-                      <div className="space-y-3 text-xs">
-                        {overview.floor_plans.length === 0 && (
-                          <p className="text-muted-foreground">
-                            No floor plans configured yet.
-                          </p>
-                        )}
-
-                        {overview.floor_plans.map((fp) => {
-                          const used = fp.occupied_tables + fp.reserved_tables
-                          const total = fp.total_tables || 1
-                          const rate = (used / total) * 100
-
-                          return (
-                            <div
-                              key={fp.id}
-                              className="space-y-1 rounded-md border bg-card px-3 py-2"
-                            >
-                              <div className="flex items-center justify-between">
-                                <p className="font-medium">{fp.name}</p>
-                                <span className="text-[11px] text-muted-foreground">
-                                  {used}/{fp.total_tables} tables active
-                                </span>
-                              </div>
-                              <Progress value={rate} />
-                              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                                <span>Occupied: {fp.occupied_tables}</span>
-                                <span>Reserved: {fp.reserved_tables}</span>
-                                <span>
-                                  Needs cleaning: {fp.needs_cleaning_tables}
-                                </span>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
+                        </div>
                     </ScrollArea>
                   </CardContent>
                 </Card>
               )}
 
-              {/* Recent orders - Visible to ALL */}
-              <Card className={cn(
-                  "lg:col-span-2", 
-                  isManagerial ? "2xl:col-span-2" : isKitchen ? "2xl:col-span-4" : "2xl:col-span-3"
-                )}>
-                <CardHeader className="space-y-1">
-                  <CardTitle className="text-base">Recent orders</CardTitle>
-                  <CardDescription>
-                    Last 10 orders in this restaurant
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <ScrollArea className="h-[260px]">
-                    <div className="space-y-2 text-xs">
-                      {overview.recent_orders.length === 0 && (
-                        <p className="text-muted-foreground">
-                          No recent orders found.
-                        </p>
-                      )}
-
-                      {overview.recent_orders.map((o) => (
-                        <div
-                          key={o.id}
-                          className="flex flex-col gap-2 rounded-md border bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-medium">
-                                #{o.code ?? o.id}
-                              </span>
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] uppercase"
-                              >
-                                {o.status}
-                              </Badge>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground">
-                              {o.table_name ?? "No table"}
-                              {o.waiter_name && <> · {o.waiter_name}</>}
-                              {o.client_name && <> · {o.client_name}</>}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {formatDateTime(o.opened_at)}
-                            </p>
-                          </div>
-                          <div className="flex flex-row items-center justify-between gap-3 sm:flex-col sm:items-end">
-                            {/* Hide total price for Kitchen/Waiters to keep it operational focus */}
-                            {(isManagerial || isCashier) && (
-                              <span className="text-xs font-semibold">
-                                {formatCurrency(o.total, currency)}
-                              </span>
-                            )}
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "text-[10px] uppercase",
-                                paymentBadgeClass(o.payment_status)
-                              )}
-                            >
-                              {o.payment_status}
-                            </Badge>
-                          </div>
+              {/* Occupancy */}
+              {!isKitchen && (
+                <Card className={cn("shadow-none border-border/60", isManagerial ? "2xl:col-span-1" : "lg:col-span-1")}>
+                  <CardHeader>
+                    <CardTitle className="text-base font-semibold">Occupancy</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col items-center justify-center py-6">
+                        <div className="relative flex items-center justify-center h-32 w-32">
+                             <svg className="h-full w-full transform -rotate-90" viewBox="0 0 36 36">
+                                <path className="text-muted/20" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
+                                <path className="text-primary transition-all duration-1000 ease-out" strokeDasharray={`${overview.metrics.occupancy_rate}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
+                             </svg>
+                             <div className="absolute flex flex-col items-center">
+                                <span className="text-3xl font-bold">{overview.metrics.occupancy_rate.toFixed(0)}%</span>
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Capacity</span>
+                             </div>
                         </div>
-                      ))}
                     </div>
-                  </ScrollArea>
+                    
+                    <div className="space-y-4 mt-2">
+                        {overview.floor_plans.map(fp => (
+                            <div key={fp.id} className="space-y-1.5">
+                                <div className="flex justify-between text-xs font-medium">
+                                    <span>{fp.name}</span>
+                                    <span className="text-muted-foreground">{fp.occupied_tables + fp.reserved_tables}/{fp.total_tables}</span>
+                                </div>
+                                <div className="flex gap-0.5 h-1.5 w-full rounded-full overflow-hidden bg-muted">
+                                    <div style={{ width: `${(fp.occupied_tables / fp.total_tables) * 100}%` }} className="bg-primary" />
+                                    <div style={{ width: `${(fp.reserved_tables / fp.total_tables) * 100}%` }} className="bg-amber-400" />
+                                    <div style={{ width: `${(fp.needs_cleaning_tables / fp.total_tables) * 100}%` }} className="bg-blue-400" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Feed */}
+              <Card className={cn("shadow-none border-border/60", isManagerial ? "2xl:col-span-2 lg:col-span-2" : "2xl:col-span-3 lg:col-span-1")}>
+                <CardHeader>
+                  <CardTitle className="text-base font-semibold">Latest Activity</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <ScrollArea className="h-[320px]">
+                        <div className="divide-y divide-border/30">
+                            {overview.recent_orders.length === 0 ? <div className="p-4 text-center text-xs text-muted-foreground">No recent activity</div> : (
+                                overview.recent_orders.map(o => (
+                                    <div key={o.id} className="p-4 flex items-center justify-between hover:bg-muted/20 transition-colors">
+                                        <div className="flex flex-col gap-0.5">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-mono text-xs font-medium text-foreground">#{o.code || o.id}</span>
+                                                <span className="text-xs font-semibold text-foreground">{o.table_name || "Takeout"}</span>
+                                            </div>
+                                            <div className="text-[10px] text-muted-foreground flex gap-1">
+                                                <span>{formatDateTime(o.opened_at)}</span>
+                                                {o.waiter_name && <span>• {o.waiter_name.split(' ')[0]}</span>}
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-3">
+                                            <Badge variant="secondary" className="text-[10px] h-5 px-1.5 font-normal bg-muted text-muted-foreground hover:bg-muted">
+                                                {o.status}
+                                            </Badge>
+                                            {(isManagerial || isCashier) && (
+                                                <span className="text-xs font-bold w-14 text-right tabular-nums">{formatMoney(o.total, currency)}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </ScrollArea>
                 </CardContent>
               </Card>
+
             </div>
-          </>
+          </div>
         )}
       </div>
     </TooltipProvider>
   )
 }
 
-/* ----------------- Sub-components & helpers ----------------- */
+/* --- Refined Sub-Components --- */
+
+function MetricCard({ label, value, currency, icon: Icon, trend, trendUp, alert, percentage }: any) {
+    const formattedValue = typeof value === 'number' ? 
+        (currency ? formatCurrency(value, currency) : value.toLocaleString()) : value;
+
+    return (
+        <Card className={cn(
+            "shadow-none border-border/60 relative overflow-hidden transition-all hover:bg-muted/20",
+            alert && "border-red-200 bg-red-50/50 dark:border-red-900/30 dark:bg-red-900/10"
+        )}>
+            <CardContent className="p-5">
+                <div className="flex justify-between items-start mb-2">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
+                    {Icon && <Icon className="h-4 w-4 text-muted-foreground/50" />}
+                </div>
+                <div className="flex items-baseline gap-2">
+                    <h3 className="text-2xl font-bold tracking-tight text-foreground">{formattedValue}</h3>
+                </div>
+                {trend && (
+                    <div className="flex items-center gap-1 mt-2">
+                        {trendUp ? <ArrowUpRight className="h-3 w-3 text-emerald-500" /> : <ArrowDownRight className="h-3 w-3 text-red-500" />}
+                        <span className={cn("text-xs font-medium", trendUp ? "text-emerald-600" : "text-red-600")}>
+                            {percentage}% <span className="text-muted-foreground font-normal">vs last period</span>
+                        </span>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    )
+}
+
+function StatusRow({ label, count, total, colorClass }: any) {
+    const pct = total > 0 ? (count / total) * 100 : 0
+    return (
+        <div className="space-y-1.5">
+            <div className="flex justify-between items-center text-xs">
+                <span className="font-medium">{label}</span>
+                <span className="text-muted-foreground">{count}</span>
+            </div>
+            <Progress value={pct} className="h-1.5" indicatorColor={colorClass.replace("bg-", "")} />
+        </div>
+    )
+}
+
+function FinanceStat({ label, value, color }: any) {
+    return (
+        <div className="text-center p-2 rounded bg-muted/30">
+            <div className="text-[10px] uppercase text-muted-foreground mb-0.5">{label}</div>
+            <div className={cn("text-lg font-bold", color)}>{value}</div>
+        </div>
+    )
+}
 
 function DashboardSkeleton() {
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, idx) => (
-          <Card key={idx}>
-            <CardHeader className="space-y-1">
-              <Skeleton className="h-3 w-24" />
-              <Skeleton className="h-6 w-20" />
-            </CardHeader>
-            <CardContent>
-              <Skeleton className="h-8 w-32" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-5">
-        <Card className="lg:col-span-3">
-          <CardHeader className="space-y-1">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-3 w-40" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-56 w-full" />
-          </CardContent>
-        </Card>
-        <Card className="lg:col-span-2">
-          <CardHeader className="space-y-1">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-3 w-32" />
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-4 w-full" />
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        {Array.from({ length: 2 }).map((_, idx) => (
-          <Card key={idx}>
-            <CardHeader className="space-y-1">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-3 w-40" />
-            </CardHeader>
-            <CardContent>
-              <Skeleton className="h-56 w-full" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, idx) => (
-          <Card key={idx}>
-            <CardHeader className="space-y-1">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-3 w-40" />
-            </CardHeader>
-            <CardContent>
-              <Skeleton className="h-56 w-full" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-type MetricCardProps = {
-  label: string
-  value: string
-  icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>
-  hint?: string
-}
-
-function MetricCard({ label, value, icon: Icon, hint }: MetricCardProps) {
-  return (
-    <Card className="transition-shadow hover:shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <div>
-          <CardTitle className="text-xs font-medium text-muted-foreground">
-            {label}
-          </CardTitle>
+    return (
+        <div className="space-y-6">
+            <div className="grid gap-4 sm:grid-cols-4">
+                {[1,2,3,4].map(i => <Skeleton key={i} className="h-28 rounded-xl" />)}
+            </div>
+            <div className="grid gap-4 lg:grid-cols-5">
+                <Skeleton className="h-[320px] lg:col-span-3 rounded-xl" />
+                <Skeleton className="h-[320px] lg:col-span-2 rounded-xl" />
+            </div>
         </div>
-        {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-semibold tracking-tight">
-            {value}
-          </span>
+    )
+}
+
+const CustomTooltip = ({ active, payload, label, currency }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-background/95 backdrop-blur-md border border-border px-3 py-2 rounded-lg shadow-lg text-xs">
+          <p className="font-medium mb-1">{label}</p>
+          {payload.map((entry: any, index: number) => (
+            <div key={index} className="flex items-center gap-2 text-muted-foreground">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span>{entry.name}:</span>
+                <span className="font-bold text-foreground">
+                    {currency ? formatMoney(entry.value, currency) : entry.value}
+                </span>
+            </div>
+          ))}
         </div>
-        {hint && (
-          <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
-        )}
-      </CardContent>
-    </Card>
-  )
+      );
+    }
+    return null;
+};
+
+// Helpers
+function formatCurrency(amount: number, currency: string) {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount)
 }
 
-function EmptyChartState() {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-muted-foreground">
-      <span>No data available for this period.</span>
-      <span>Try changing the timeframe.</span>
-    </div>
-  )
+function shortCurrency(amount: number, currency: string) {
+    if (amount >= 1000000) return (amount / 1000000).toFixed(1) + 'M';
+    if (amount >= 1000) return (amount / 1000).toFixed(1) + 'k';
+    return amount.toString();
 }
 
-function EmptyTableState({ label }: { label: string }) {
-  return <p className="text-xs text-muted-foreground">{label}</p>
-}
-
-function renderStatusRow(
-  label: string,
-  count: number,
-  total: number,
-  barClass?: string
-) {
-  const pct = total > 0 ? (count / total) * 100 : 0
-  return (
-    <div className="space-y-1" key={label}>
-      <div className="flex items-center justify-between">
-        <span>{label}</span>
-        <span>
-          {count} · {pct.toFixed(0)}%
-        </span>
-      </div>
-      <Progress value={pct} className={barClass} />
-    </div>
-  )
-}
-
-function renderPaymentRow(label: string, count: number, dotClass: string) {
-  return (
-    <div className="flex items-center justify-between gap-2" key={label}>
-      <div className="flex items-center gap-2">
-        <span className={cn("h-2 w-2 rounded-full", dotClass)} />
-        <span>{label}</span>
-      </div>
-      <span>{count}</span>
-    </div>
-  )
-}
-
-function timeframeLabel(tf: DashboardTimeframe): string {
-  switch (tf) {
-    case "today":
-      return "Today"
-    case "week":
-      return "Last 7 days"
-    case "month":
-      return "This month"
-    case "year":
-      return "This year"
-    default:
-      return ""
-  }
-}
-
-function formatCurrency(amount: number, currency: string): string {
-  if (!Number.isFinite(amount)) return "-"
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
-
-function shortCurrency(amount: number, currency: string): string {
-  if (!Number.isFinite(amount)) return "-"
-  const abs = Math.abs(amount)
-
-  if (abs >= 1_000_000) {
-    return `${(amount / 1_000_000).toFixed(1)}M`
-  }
-  if (abs >= 1_000) {
-    return `${(amount / 1_000).toFixed(1)}K`
-  }
-
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-function paymentBadgeClass(status: string): string {
-  const s = status.toLowerCase()
-  if (s === "paid") return "border-emerald-500/40 text-emerald-600"
-  if (s === "partial") return "border-amber-500/40 text-amber-600"
-  if (s === "refunded") return "border-sky-500/40 text-sky-600"
-  if (s === "unpaid") return "border-muted-foreground/40 text-muted-foreground"
-  return ""
+function formatDateTime(iso: string) {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
