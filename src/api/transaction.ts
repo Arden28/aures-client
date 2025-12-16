@@ -21,9 +21,9 @@ export type TransactionPayload = {
 export async function fetchTransactions(params?: any) {
   const res = await apiService.get("/v1/transactions", { params })
   // Handle Laravel Pagination wrapping
-  if(res.data && res.data.data && Array.isArray(res.data.data)) {
-      return res.data.data as Transaction[]
-  }
+//   if(res.data && res.data.data && Array.isArray(res.data.data)) {
+//       return res.data.data as Transaction[]
+//   }
   return (res.data as Transaction[]) || []
 }
 
