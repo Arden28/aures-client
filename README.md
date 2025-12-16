@@ -27,7 +27,7 @@
       <img src="https://img.shields.io/badge/Vite-B73C92?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
     </a>
     <a href="https://laravel.com/">
-      <img src="https://img.shields.io/badge/backend-Laravel_11-FF2D20?style=for-the-badge&logo=laravel&logoColor=white" alt="Laravel" />
+      <img src="https://img.shields.io/badge/Laravel_12-FF2D20?style=for-the-badge&logo=laravel&logoColor=white" alt="Laravel" />
     </a>
     <a href="https://pusher.com/">
       <img src="https://img.shields.io/badge/Pusher-Realtime-20c997?style=for-the-badge&logo=pusher&logoColor=white" alt="Pusher" />
@@ -65,6 +65,24 @@ It is divided into three distinct synchronized interfaces:
 | **Waiter Mobile View** | **Kitchen Display System** |
 |:---:|:---:|
 | <img src="https://placehold.co/300x600/18181b/FFF?text=Waiter+UI" alt="Waiter UI" width="250" /> | <img src="https://placehold.co/600x400/18181b/FFF?text=KDS+Board" alt="KDS UI" width="400" /> |
+
+---
+## 🛠️ Tech Stack
+
+### Frontend (Client)
+* **Framework:** React 18 + TypeScript
+* **Build Tool:** Vite
+* **Styling:** TailwindCSS + Shadcn/UI
+* **State/Data:** TanStack Query (React Query)
+* **Animations:** Framer Motion
+* **Charts:** Recharts
+
+### Backend (Server)
+* **Framework:** Laravel 10/11 (PHP)
+* **Database:** MySQL 8.0+
+* **Authentication:** Laravel Sanctum (SPA Auth)
+* **Broadcasting:** Pusher Channels (WebSockets)
+* **API:** RESTful JSON API
 
 ---
 
