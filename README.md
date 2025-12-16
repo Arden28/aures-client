@@ -27,7 +27,7 @@
       <img src="https://img.shields.io/badge/Vite-B73C92?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
     </a>
     <a href="https://laravel.com/">
-      <img src="https://img.shields.io/badge/Vite-B73C92?style=for-the-badge&logo=laravel&logoColor=white" alt="Laravel" />
+      <img src="https://img.shields.io/badge/backend-Laravel_11-FF2D20?style=for-the-badge&logo=laravel&logoColor=white" alt="Laravel" />
     </a>
     <a href="https://pusher.com/">
       <img src="https://img.shields.io/badge/Pusher-Realtime-20c997?style=for-the-badge&logo=pusher&logoColor=white" alt="Pusher" />
@@ -46,6 +46,17 @@ It is divided into three distinct synchronized interfaces:
 1.  **🤵 Waiter Mode:** A mobile-optimized interface for taking orders, managing tables, and receiving notifications when food is ready.
 2.  **👨‍🍳 Kitchen Display System (KDS):** A digital Kanban board for chefs to view, track, and bump orders via drag-and-drop or touch interactions.
 3.  **💸 Cashier Station:** A streamlined dashboard for processing payments, splitting bills, and viewing daily sales statistics.
+
+---
+
+## ✨ Key Features
+
+* **🖥️ Point of Sale (POS):** Interactive interface for waiters and cashiers to manage orders and payments.
+* **🗺️ Live Floor Plan:** Drag-and-drop table management with real-time status indicators (Occupied, Free, Needs Cleaning).
+* **👨‍🍳 Kitchen Display System (KDS):** Real-time order pipeline for kitchen staff to track prep times and statuses.
+* **📱 QR Customer Portal:** Progressive Web App (PWA) allowing customers to scan tables and order directly.
+* **📊 Executive Dashboard:** Real-time analytics, revenue tracking, and staff performance metrics with auto-polling.
+* **⚡ Real-time Sync:** Instant updates across all devices using WebSockets (Pusher).
 
 ---
 
