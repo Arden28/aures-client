@@ -129,6 +129,10 @@ export const router = createBrowserRouter([
           {
             element: <RequireAuth />, // must be logged in
             children: [
+              
+              // Redirect "/" → "/dashboard" for POS routes
+              { index: true, element: <Navigate to="/dashboard" replace /> },
+              
               // WAITER ONLY
               {
                 path: "waiter",
