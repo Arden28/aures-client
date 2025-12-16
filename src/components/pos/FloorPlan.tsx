@@ -509,7 +509,7 @@ function TableDetailsPopoverContent({
                 {hasActiveOrders && (
                     <Button 
                         onClick={handleFinishService} 
-                        className="w-full h-10 shadow-sm border border-border/50" 
+                        className="w-full h-10 shadow-sm border border-border/50 text-white" 
                         variant="secondary"
                     >
                         <LogOut className="w-3.5 h-3.5 mr-2 opacity-70" />
