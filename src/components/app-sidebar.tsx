@@ -55,7 +55,7 @@ const data = {
   navMain: [
     {
       title: "Overview",
-      url: "/",
+      url: "/dashboard",
       icon: LayoutDashboard,
       isActive: true,
       // No roles array implies "public" (to authenticated users)
