@@ -57,13 +57,14 @@ function Providers() {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                   Router                                   */
+/* Router                                   */
 /* -------------------------------------------------------------------------- */
 
 export const router = createBrowserRouter([
   {
     element: <Providers />,
     children: [
+      
       /* --------------------------- AUTH ROUTES ---------------------------- */
       {
         path: "/auth",
@@ -80,24 +81,36 @@ export const router = createBrowserRouter([
         ],
       },
 
-
+      /* ------------------------- ROOT REDIRECT ---------------------------- */
+      // 
+      // This ensures if a Guest hits "/" exactly, they go to login immediately
+      // without trying to render any App layouts first.
+      {
+        path: "/",
+        element: <GuestOnly />,
+        children: [
+          { index: true, element: <Navigate to="/auth/login" replace /> }
+        ]
+      },
 
       /* ------------------------ BACKOFFICE ROUTES ------------------------ */
       {
         path: "/",
-        element: <AppLayout />,
+        // 1. We move RequireAuth UP. It now wraps the Layout.
+        //    If not auth, it redirects. AppLayout never renders.
+        element: <RequireAuth />, 
         children: [
           {
-            element: <RequireAuth />, // must be logged in
+            element: <AppLayout />,
             children: [
               {
-                element: <RequireRole allowed={["owner", "manager"]} />, // only owner + manager
+                element: <RequireRole allowed={["owner", "manager"]} />,
                 children: [
-                  // "/" → "/dashboard"
+                  // "/" -> "/dashboard"
                   { index: true, element: <Navigate to="dashboard" replace /> },
 
                   { path: "dashboard", element: withSuspense(<Dashboard />) },
-
+                  
                   // Menu
                   { path: "menu/products", element: withSuspense(<Products />) },
                   { path: "menu/categories", element: withSuspense(<Categories />) },
@@ -120,16 +133,16 @@ export const router = createBrowserRouter([
         ],
       },  
 
-
       /* ----------------------------- POS ROUTES --------------------------- */
       {
         path: "/",
-        element: <PosLayout />,
+        // 2. Same here for POS. Check Auth first.
+        element: <RequireAuth />, 
         children: [
           {
-            element: <RequireAuth />, // must be logged in
+            element: <PosLayout />,
             children: [
-              // WAITER ONLY
+              // WAITER
               {
                 path: "waiter",
                 element: <RequireRole allowed={["waiter"]} />,
@@ -138,7 +151,7 @@ export const router = createBrowserRouter([
                 ],
               },
 
-              // CASHIER ONLY
+              // CASHIER
               {
                 path: "cashier",
                 element: <RequireRole allowed={["cashier"]} />,
@@ -147,7 +160,7 @@ export const router = createBrowserRouter([
                 ],
               },
 
-              // KITCHEN ONLY
+              // KITCHEN
               {
                 path: "kitchen",
                 element: <RequireRole allowed={["kitchen"]} />,
@@ -160,8 +173,6 @@ export const router = createBrowserRouter([
         ],
       },
 
-
-
       /* ----------------------------- PORTAL ROUTES --------------------------- */
       {
         path: "/portal",
@@ -170,7 +181,6 @@ export const router = createBrowserRouter([
             { index: true, element: withSuspense(<PortalPage />) },
         ],
       },
-
 
       /* ----------------------------- FALLBACK ----------------------------- */
       { path: "*", element: withSuspense(<NotFound />) },
