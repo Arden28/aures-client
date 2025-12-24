@@ -123,14 +123,14 @@ export default function PortalPage() {
         }
 
       } catch (e: any) {
-        console.error(e)
+        // console.error(e)
         
         // 3. Handle the Blocking Logic
-        if (e.response?.status === 403 && e.response?.data?.code === 'DEVICE_LOCKED') {
+        if (e.status === 403 && e.payload?.code === 'DEVICE_LOCKED') {
            setIsDeviceBlocked(true)
            setLockedInfo({
-               restaurant: e.response.data.restaurant_name,
-               table: e.response.data.table_name
+               restaurant: e.payload.restaurant_name,
+               table: e.payload.table_name
            })
            // We do NOT set generic error, so the specific UI below renders instead
         } else {
