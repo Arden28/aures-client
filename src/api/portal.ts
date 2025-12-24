@@ -69,21 +69,21 @@ export type TableSession = {
 
 /* --------------------------- API --------------------------- */
 
-export async function fetchPortalData(tableCode: string) {
-  const res = await apiService.get<any>(`/v1/portal/${tableCode}`)
+export async function fetchPortalData(tableCode: string, deviceId: string) {
+  const res = await apiService.get<any>(`/v1/portal/${tableCode}?device_id=${deviceId}`)
   return res.data
 }
 
-export async function placePortalOrder(tableCode: string, sessionId: number | null, items: PortalCartItem[]): Promise<ActiveSessionData> {
+export async function placePortalOrder(tableCode: string, sessionId: number | null, deviceId: string, items: PortalCartItem[]): Promise<ActiveSessionData> {
   // Determine if we are updating an existing order (session)
-  const payload = { items, session_id: sessionId }
+  const payload = { items, session_id: sessionId, device_id: deviceId }
 
   // We send the request
   await apiService.post<any>(`/v1/portal/${tableCode}/order`, payload)
 
   // IMPORTANT: We immediately re-fetch the full portal data to get the 
   // correct aggregated state (totals, item IDs, merged orders) from the server.
-  const fullSessionData = await fetchPortalData(tableCode);
+  const fullSessionData = await fetchPortalData(tableCode, deviceId);
   
   // Return the aggregated active order data
   return fullSessionData.active_session as ActiveSessionData;

@@ -7,7 +7,7 @@ import {
   Flame, CheckCircle2, X, ChefHat, Utensils, BellRing, Receipt,
   RotateCcw, CreditCard, Clock,
   Check,
-  LogOut
+  LogOut, Users, ShieldAlert
 } from "lucide-react"
 
 import { cn, formatMoney } from "@/lib/utils"
@@ -35,6 +35,7 @@ import {
   type OrderSummary
 } from "@/api/portal"
 import { useSearchParams } from "react-router-dom"
+import { getDeviceId } from "@/utils/device"
 
 /* -------------------------------------------------------------------------- */
 /* Main Component                                                             */
@@ -47,6 +48,10 @@ export default function PortalPage() {
   // -- State
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+
+  // Device Blocking State
+  const [isDeviceBlocked, setIsDeviceBlocked] = React.useState(false)
+  const [lockedInfo, setLockedInfo] = React.useState<{restaurant: string, table: string} | null>(null)
 
   const [session, setSession] = React.useState<TableSession | null>(null)
   const [categories, setCategories] = React.useState<PortalCategory[]>([])
@@ -100,25 +105,37 @@ export default function PortalPage() {
         return
       }
 
+      // 1. Get Device ID
+      const deviceId = getDeviceId();
+
       try {
-        const data = await fetchPortalData(tableCode)
+        // 2. Pass deviceId to the API
+        const data = await fetchPortalData(tableCode, deviceId)
         
         setSession(data.session)
         setCategories(data.menu.categories)
         setProducts(data.menu.products)
         
-        // Populate session data if exists
-        // Note: The controller returns 'active_session'
         const sessionPayload = data.active_session || data.active_order;
         if (sessionPayload) { 
             setActiveSessionData(sessionPayload)
-            // Load existing items into the cart view so they appear as "locked"
             setCart(sessionPayload.items)
         }
 
-      } catch (e) {
+      } catch (e: any) {
         console.error(e)
-        setError("Invalid or expired table code.")
+        
+        // 3. Handle the Blocking Logic
+        if (e.response?.status === 403 && e.response?.data?.code === 'DEVICE_LOCKED') {
+           setIsDeviceBlocked(true)
+           setLockedInfo({
+               restaurant: e.response.data.restaurant_name,
+               table: e.response.data.table_name
+           })
+           // We do NOT set generic error, so the specific UI below renders instead
+        } else {
+           setError("Invalid or expired table code.")
+        }
       } finally {
         setIsLoading(false)
       }
@@ -301,22 +318,22 @@ export default function PortalPage() {
   const handleOrderSubmission = async () => {
     if (!session || !tableCode) return
     setIsOrdering(true)
+
+    const deviceId = getDeviceId();
+
     try {
-      // 1. Submit the cart. We pass the active_session_id to link it.
-      // The API returns the aggregated session data.
+      // 1. Submit the cart.
       const result: ActiveSessionData = await placePortalOrder(
           tableCode, 
           session.active_session_id, 
+          deviceId,
           cart
       )
       
-      // 2. Update local state with the aggregated result
+      // 2. Success updates
       setActiveSessionData(result)
-      
-      // 3. Update the cart to match the server state (this adds order_item_ids to new items)
       setCart(result.items)
       
-      // 4. Update the session state (in case we just created a new one)
       if (!session.active_session_id) {
           setSession(prev => prev ? { ...prev, active_session_id: result.session_id } : null)
       }
@@ -328,7 +345,19 @@ export default function PortalPage() {
 
     } catch (e: any) {
       console.error(e)
-      toast.error(e.message || "Failed to submit order.")
+
+      // --- NEW: Handle Device Lock Specifically ---
+      if (e.response?.status === 403 && e.response?.data?.code === 'DEVICE_LOCKED') {
+        // Option A: Specific Toast
+        toast.error("This table is currently active on another device.");
+        
+        // Option B: kick them out or show a modal
+        // setIsLockedModalOpen(true); 
+      } else {
+        // Fallback for other errors
+        toast.error(e.response?.data?.message || "Failed to submit order.")
+      }
+
     } finally {
       setIsOrdering(false)
     }
@@ -389,6 +418,57 @@ export default function PortalPage() {
   // -- Render States
   if (isLoading) return <PortalSkeleton />
   
+  // -- Render States
+  if (isLoading) return <PortalSkeleton />
+
+  // Blocked Screen
+  if (isDeviceBlocked) {
+      return (
+          <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center space-y-8 bg-background relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-red-50 to-transparent pointer-events-none" />
+
+              <div className="relative z-10 flex flex-col items-center animate-in zoom-in-95 duration-500">
+                  <div className="h-24 w-24 bg-red-100 rounded-full flex items-center justify-center mb-6 shadow-xl shadow-red-100/50">
+                      <ShieldAlert className="h-10 w-10 text-red-600" />
+                  </div>
+                  
+                  <h1 className="text-3xl font-extrabold tracking-tight text-foreground mb-2">
+                      Table Occupied
+                  </h1>
+                  <p className="text-lg text-muted-foreground max-w-xs leading-relaxed">
+                      <span className="font-semibold text-foreground">{lockedInfo?.table}</span> is currently being managed by another device.
+                  </p>
+              </div>
+
+              <div className="w-full max-w-sm space-y-4 relative z-10">
+                  <div className="bg-muted/40 p-4 rounded-2xl border border-border/50 flex items-start gap-4 text-left">
+                      <Users className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
+                      <div className="space-y-1">
+                          <p className="font-semibold text-sm">Why am I seeing this?</p>
+                          <p className="text-xs text-muted-foreground">
+                              To prevent accidental double-orders, only one device can control the active tab at a time.
+                          </p>
+                      </div>
+                  </div>
+
+                  <Button 
+                      size="lg" 
+                      variant="outline"
+                      className="w-full h-14 rounded-xl border-2 font-bold gap-2"
+                      onClick={() => window.location.reload()}
+                  >
+                      Check Again
+                  </Button>
+                  
+                  <p className="text-xs text-muted-foreground pt-4">
+                      Need help? Please call a waiter.
+                  </p>
+              </div>
+          </div>
+      )
+  }
+
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center space-y-4">
