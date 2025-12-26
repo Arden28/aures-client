@@ -3,7 +3,7 @@ import {
   ShieldAlert, Users, BookOpen, ChevronLeft, Search, 
   Flame, ChevronRight, Utensils, ArrowLeft, X, ChefHat, Soup, Star 
 } from "lucide-react"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion, AnimatePresence, type Variants } from "framer-motion"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -86,31 +86,41 @@ export default function DeviceBlockedScreen({
   const clearSearch = () => setSearchQuery("")
 
   // -- Animations --
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.05 }
+    const containerVariants: Variants = {
+        hidden: { opacity: 0 },
+        show: { 
+            opacity: 1, 
+            transition: { 
+                staggerChildren: 0.05 
+            } 
+        }
     }
-  }
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0 }
-  }
-
+    
+    const itemVariants: Variants = {
+        hidden: { opacity: 0, y: 20 },
+        show: { 
+            opacity: 1, 
+            y: 0, 
+            transition: { 
+                type: "spring", 
+                stiffness: 300, 
+                damping: 24 
+            } 
+        }
+    }
   // Floating animation for Hero Icons
-  const floatVariants = {
-    animate: {
-      y: [0, -15, 0],
-      rotate: [0, 5, -5, 0],
-      transition: {
-        duration: 4,
-        repeat: Infinity,
-        ease: "easeInOut"
-      }
+
+    const floatVariants: Variants = {
+        animate: {
+            y: [0, -15, 0],
+            rotate: [0, 5, -5, 0],
+            transition: { 
+                duration: 4, 
+                repeat: Infinity, 
+                ease: "easeInOut" 
+            }
+        }
     }
-  }
 
   return (
     <div className="min-h-screen bg-background relative overflow-hidden flex flex-col">
