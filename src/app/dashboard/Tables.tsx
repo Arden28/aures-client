@@ -479,11 +479,11 @@ export default function Tables() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="floor_plan">Status</Label>
+                <Label htmlFor="status">Status</Label>
                 <Select
                   value={form.status}
                   onValueChange={(value) =>
-                    setForm((prev) => ({ ...prev, status: value }))
+                    setForm((prev) => ({ ...prev, status: value as TableStatus }))
                   }
                 >
                   <SelectTrigger className="h-9">
