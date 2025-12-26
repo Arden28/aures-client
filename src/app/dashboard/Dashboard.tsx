@@ -28,7 +28,9 @@ import {
   Bar,
   ResponsiveContainer,
   Tooltip,
-  Legend
+  Legend,
+  Cell,
+  LabelList
 } from "recharts"
 
 import {
@@ -279,8 +281,47 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
 
+
+              {/* Occupancy */}
+              {!isKitchen && (
+                <Card className={cn("shadow-none border-border/60", isManagerial ? "lg:col-span-3" : "lg:col-span-3")}>
+                  <CardHeader>
+                    <CardTitle className="text-base font-semibold">Occupancy</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col items-center justify-center py-6">
+                        <div className="relative flex items-center justify-center h-32 w-32">
+                             <svg className="h-full w-full transform -rotate-90" viewBox="0 0 36 36">
+                                <path className="text-muted/20" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
+                                <path className="text-primary transition-all duration-1000 ease-out" strokeDasharray={`${overview.metrics.occupancy_rate}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
+                             </svg>
+                             <div className="absolute flex flex-col items-center">
+                                <span className="text-3xl font-bold">{overview.metrics.occupancy_rate.toFixed(0)}%</span>
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Capacity</span>
+                             </div>
+                        </div>
+                    </div>
+                    
+                    <div className="space-y-4 mt-2">
+                        {overview.floor_plans.map(fp => (
+                            <div key={fp.id} className="space-y-1.5">
+                                <div className="flex justify-between text-xs font-medium">
+                                    <span>{fp.name}</span>
+                                    <span className="text-muted-foreground">{fp.occupied_tables + fp.reserved_tables}/{fp.total_tables}</span>
+                                </div>
+                                <div className="flex gap-0.5 h-1.5 w-full rounded-full overflow-hidden bg-muted">
+                                    <div style={{ width: `${(fp.occupied_tables / fp.total_tables) * 100}%` }} className="bg-primary" />
+                                    <div style={{ width: `${(fp.reserved_tables / fp.total_tables) * 100}%` }} className="bg-amber-400" />
+                                    <div style={{ width: `${(fp.needs_cleaning_tables / fp.total_tables) * 100}%` }} className="bg-blue-400" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
                 {/* Orders Bar Chart */}
-                <Card className="lg:col-span-3 shadow-none border-border/60 bg-card/50">
+                {/* <Card className="lg:col-span-3 shadow-none border-border/60 bg-card/50">
                   <CardHeader>
                     <CardTitle className="text-base font-semibold">Order Sources</CardTitle>
                     <CardDescription className="text-xs">Dine-in vs Online vs Takeaway</CardDescription>
@@ -301,12 +342,16 @@ export default function Dashboard() {
                         </ResponsiveContainer>
                     </div>
                   </CardContent>
-                </Card>
+                </Card> */}
               </div>
             )}
 
             {/* 3. Operational Details */}
             <div className={cn("grid gap-4", isManagerial ? "xl:grid-cols-2" : "grid-cols-1")}>
+              
+              {isManagerial && overview.operational_efficiency && (
+                 <ServiceVelocityCard efficiency={overview.operational_efficiency} />
+              )}
               
               {/* Order Status Pipeline */}
               <Card className="shadow-none border-border/60">
@@ -369,23 +414,40 @@ export default function Dashboard() {
                       
                       <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                         <TabsContent value="waiters" className="mt-0 space-y-3">
-                            {overview.staff_performance!.waiters.map((w) => (
-                                <div key={w.id} className="flex items-center justify-between group">
-                                    <div className="flex items-center gap-3">
-                                        <div className="h-9 w-9 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-xs group-hover:bg-secondary group-hover:text-white transition-colors">
-                                            {w.name.charAt(0)}
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-medium">{w.name}</p>
-                                            <p className="text-[10px] text-muted-foreground">{w.completed_orders} orders closed</p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-sm font-bold">{formatMoney(w.total_revenue, currency)}</p>
-                                        <p className="text-[10px] text-muted-foreground">{w.active_orders} active</p>
-                                    </div>
-                                </div>
-                            ))}
+{overview.staff_performance!.waiters.map((w, index) => {
+    // Calculate max revenue to normalize the bar
+    const maxRev = overview.staff_performance!.waiters[0].total_revenue || 1; 
+    const percentage = (w.total_revenue / maxRev) * 100;
+
+    return (
+        <div key={w.id} className="relative flex items-center justify-between group p-2 rounded-lg hover:bg-muted/40 transition-all">
+            {/* Background Bar for Visual Impact */}
+            <div 
+                className="absolute left-0 top-0 bottom-0 bg-primary/5 rounded-lg transition-all duration-500" 
+                style={{ width: `${percentage}%` }} 
+            />
+
+            <div className="relative flex items-center gap-3 z-10">
+                <div className="h-8 w-8 rounded-full bg-background border flex items-center justify-center font-bold text-xs shadow-sm">
+                    {w.name.charAt(0)}
+                </div>
+                <div>
+                    <p className="text-sm font-medium leading-none">{w.name}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                        <Badge variant="outline" className="text-[9px] h-4 px-1 py-0">{w.completed_orders} orders</Badge>
+                        <span className="text-[10px] text-muted-foreground">Avg: {formatMoney(w.average_order_value, currency)}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div className="relative text-right z-10">
+                <p className="text-sm font-bold">{formatMoney(w.total_revenue, currency)}</p>
+                {/* Highlight top performer */}
+                {index === 0 && <p className="text-[9px] text-emerald-600 font-medium">Top Performer</p>}
+            </div>
+        </div>
+    )
+})}
                         </TabsContent>
                         <TabsContent value="cashiers" className="mt-0 space-y-3">
                             {overview.staff_performance!.cashiers.map((c) => (
@@ -438,45 +500,6 @@ export default function Dashboard() {
                             ))}
                         </div>
                     </ScrollArea>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Occupancy */}
-              {!isKitchen && (
-                <Card className={cn("shadow-none border-border/60", isManagerial ? "2xl:col-span-1" : "lg:col-span-1")}>
-                  <CardHeader>
-                    <CardTitle className="text-base font-semibold">Occupancy</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-col items-center justify-center py-6">
-                        <div className="relative flex items-center justify-center h-32 w-32">
-                             <svg className="h-full w-full transform -rotate-90" viewBox="0 0 36 36">
-                                <path className="text-muted/20" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
-                                <path className="text-primary transition-all duration-1000 ease-out" strokeDasharray={`${overview.metrics.occupancy_rate}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
-                             </svg>
-                             <div className="absolute flex flex-col items-center">
-                                <span className="text-3xl font-bold">{overview.metrics.occupancy_rate.toFixed(0)}%</span>
-                                <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Capacity</span>
-                             </div>
-                        </div>
-                    </div>
-                    
-                    <div className="space-y-4 mt-2">
-                        {overview.floor_plans.map(fp => (
-                            <div key={fp.id} className="space-y-1.5">
-                                <div className="flex justify-between text-xs font-medium">
-                                    <span>{fp.name}</span>
-                                    <span className="text-muted-foreground">{fp.occupied_tables + fp.reserved_tables}/{fp.total_tables}</span>
-                                </div>
-                                <div className="flex gap-0.5 h-1.5 w-full rounded-full overflow-hidden bg-muted">
-                                    <div style={{ width: `${(fp.occupied_tables / fp.total_tables) * 100}%` }} className="bg-primary" />
-                                    <div style={{ width: `${(fp.reserved_tables / fp.total_tables) * 100}%` }} className="bg-amber-400" />
-                                    <div style={{ width: `${(fp.needs_cleaning_tables / fp.total_tables) * 100}%` }} className="bg-blue-400" />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -575,6 +598,85 @@ function StatusRow({ label, count, total, colorClass }: any) {
       />
     </div>
   )
+}
+
+
+// Service Velocity Component
+function ServiceVelocityCard({ efficiency }: { efficiency: any }) {
+    if (!efficiency) return null;
+
+    const data = [
+        { name: "Reaction", minutes: efficiency.avg_wait_mins, color: "hsl(var(--chart-1))", desc: "Order → Kitchen" },
+        { name: "Prep Time", minutes: efficiency.avg_prep_mins, color: "hsl(var(--chart-2))", desc: "Kitchen → Ready" },
+        { name: "Pickup", minutes: efficiency.avg_serve_mins, color: "hsl(var(--chart-3))", desc: "Ready → Table" },
+    ];
+
+    return (
+        <Card className="shadow-none border-border/60">
+            <CardHeader>
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-primary" />
+                    Service Velocity
+                </CardTitle>
+                <CardDescription className="text-xs">Average time (minutes) per stage</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="h-[200px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={data} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" opacity={0.5} />
+                            <XAxis type="number" hide />
+                            <YAxis 
+                                dataKey="name" 
+                                type="category" 
+                                tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} 
+                                width={70}
+                                tickLine={false}
+                                axisLine={false}
+                            />
+                            <Tooltip 
+                                cursor={{ fill: 'transparent' }}
+                                content={({ active, payload }) => {
+                                    if (active && payload && payload.length) {
+                                        const d = payload[0].payload;
+                                        return (
+                                            <div className="bg-popover border border-border px-3 py-2 rounded-lg shadow-lg text-xs">
+                                                <p className="font-bold mb-1">{d.name}</p>
+                                                <p className="text-muted-foreground">{d.desc}</p>
+                                                <p className="text-lg font-bold mt-1">{d.minutes} <span className="text-xs font-normal text-muted-foreground">mins</span></p>
+                                            </div>
+                                        )
+                                    }
+                                    return null;
+                                }}
+                            />
+                            <Bar dataKey="minutes" radius={[0, 4, 4, 0]} barSize={32}>
+                                {data.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                                <LabelList dataKey="minutes" position="right" fontSize={11} fontWeight="bold" formatter={(val: number) => val + "m"} />
+                            </Bar>
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+                
+                <div className="mt-4 grid grid-cols-3 text-center divide-x divide-border/50">
+                    <div>
+                        <p className="text-[10px] text-muted-foreground uppercase">Reaction</p>
+                        <p className="text-sm font-bold">{efficiency.avg_wait_mins}m</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] text-muted-foreground uppercase">Cooking</p>
+                        <p className="text-sm font-bold">{efficiency.avg_prep_mins}m</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] text-muted-foreground uppercase">Pickup</p>
+                        <p className="text-sm font-bold">{efficiency.avg_serve_mins}m</p>
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+    )
 }
 
 function FinanceStat({ label, value, color }: any) {

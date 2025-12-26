@@ -11,6 +11,12 @@ export type RevenueSeriesPoint = {
   total: number
 }
 
+export type OperationalEfficiency = {
+  avg_wait_mins: number  // Pending -> Preparing
+  avg_prep_mins: number  // Preparing -> Ready
+  avg_serve_mins: number // Ready -> Served
+}
+
 export type OrdersSeriesPoint = {
   label: string
   dine_in: number
@@ -119,6 +125,8 @@ export type DashboardOverview = {
 
   // Staff (only for owner/manager)
   staff_performance?: StaffPerformance
+
+  operational_efficiency: OperationalEfficiency
 }
 
 type DashboardApiResponse = {

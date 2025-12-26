@@ -1,7 +1,7 @@
 // src/api/table.ts
 import apiService, { type ApiResult } from "@/api/apiService"
 
-export type TableStatus = "free" | "reserved" | "occupied" | "needs_cleaning"
+export type TableStatus = "free" | "reserved" | "occupied" | "needs_cleaning" | "disabled"
 
 export type RestaurantMini = {
   id: number
@@ -28,6 +28,7 @@ export type TablePayload = {
   name: string
   capacity: number
   floor_plan_id?: number | null
+  status?: TableStatus
 }
 
 type TableIndexResponse =

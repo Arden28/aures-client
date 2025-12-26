@@ -10,6 +10,11 @@ export interface KDSTable {
     id: number
     name: string
 }
+export interface KDSStatusHistoryEntry {
+    status: string;
+    at: string; // "Y-m-d H:i:s"
+    user_id?: number | null;
+}
 
 export interface KDSProduct {
     id: number
@@ -39,6 +44,7 @@ export interface KDSOrder {
     status: OrderStatusValue
     opened_at: string 
     ticket_number?: string
+    statusHistory?: KDSStatusHistoryEntry[];
 }
 
 /* -------------------------- API Calls -------------------------- */

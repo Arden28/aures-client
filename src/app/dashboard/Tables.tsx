@@ -49,6 +49,7 @@ type TableFormState = {
   name: string
   capacity: string
   floor_plan_id: string 
+  status: TableStatus
 }
 
 type FloorOption = {
@@ -61,6 +62,7 @@ const STATUS_OPTIONS: { value: TableStatus; label: string }[] = [
   { value: "reserved", label: "Reserved" },
   { value: "occupied", label: "Occupied" },
   { value: "needs_cleaning", label: "Needs cleaning" },
+  { value: "disabled", label: "Out of Service" },
 ]
 
 type StatusFilter = "all" | TableStatus
@@ -83,6 +85,7 @@ export default function Tables() {
     name: "",
     capacity: "",
     floor_plan_id: "none",
+    status: "free",
   })
   
   // --- QR Dialog State ---
@@ -153,6 +156,7 @@ export default function Tables() {
       name: "",
       capacity: "",
       floor_plan_id: "none",
+      status: "free",
     })
     setIsDialogOpen(true)
   }
@@ -164,6 +168,7 @@ export default function Tables() {
       name: table.name,
       capacity: table.capacity ? String(table.capacity) : "",
       floor_plan_id: table.floor_plan?.id ? String(table.floor_plan.id) : "none",
+      status: table.status,
     })
     setIsDialogOpen(true)
   }
@@ -208,10 +213,16 @@ export default function Tables() {
       const payload: TablePayload = {
         name: form.name.trim(),
         capacity: Number(form.capacity),
+        status: form.status,
       }
 
       if (!payload.name) {
         toast.error("Name is required.")
+        return
+      }
+
+      if(!payload.status) {
+        toast.error("Status is required.")
         return
       }
 
@@ -294,6 +305,8 @@ export default function Tables() {
             occupied: "bg-red-500/10 text-red-500 ring-1 ring-red-500/30",
             needs_cleaning:
               "bg-sky-500/10 text-sky-500 ring-1 ring-sky-500/30",
+            disabled:
+              "bg-gray-500/10 text-gray-500 ring-1 ring-gray-500/30",
           }
 
           return (
@@ -442,26 +455,50 @@ export default function Tables() {
                 </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="floor_plan">Floor</Label>
-              <Select
-                value={form.floor_plan_id}
-                onValueChange={(value) =>
-                  setForm((prev) => ({ ...prev, floor_plan_id: value }))
-                }
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select floor" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No floor</SelectItem>
-                  {floors.map((f) => (
-                    <SelectItem key={f.id} value={String(f.id)}>
-                      {f.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="floor_plan">Floor</Label>
+                <Select
+                  value={form.floor_plan_id}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({ ...prev, floor_plan_id: value }))
+                  }
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select floor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No floor</SelectItem>
+                    {floors.map((f) => (
+                      <SelectItem key={f.id} value={String(f.id)}>
+                        {f.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="floor_plan">Status</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({ ...prev, status: value }))
+                  }
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select table status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* <SelectItem value="none">Status</SelectItem> */}
+                    {STATUS_OPTIONS.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <DialogFooter className="mt-2">

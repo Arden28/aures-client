@@ -127,3 +127,19 @@ export function subscribeToSessionOrders(orderIds: number[], callbacks: Realtime
       });
   };
 }
+
+export function subscribeToSessionStatus(sessionId: number, onClosed: () => void) {
+    if (!echo || !sessionId) return () => {};
+
+    const channelName = `table.session.${sessionId}`;
+    const channel = echo.channel(channelName);
+
+    channel.listen('.table.session.closed', (e: any) => {
+        console.log("Realtime: Session Closed", e);
+        onClosed();
+    });
+
+    return () => {
+        echo.leave(channelName);
+    };
+}

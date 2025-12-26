@@ -74,6 +74,25 @@ const playAudio = (type: 'new' | 'move') => {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Helper: Calculate Start Time based on Status                               */
+/* -------------------------------------------------------------------------- */
+const getOrderStartTime = (order: KDSOrder): string => {
+  // If no history exists, fall back to when the ticket was first opened
+  if (!order.statusHistory || !Array.isArray(order.statusHistory) || order.statusHistory.length === 0) {
+    return order.opened_at
+  }
+
+  // Find the MOST RECENT entry matching the current status.
+  // We reverse a copy of the array so we find the latest occurrence.
+  const entry = [...order.statusHistory]
+    .reverse()
+    .find(h => h.status === order.status)
+
+  // If found, return that specific timestamp. Otherwise, fallback to opened_at.
+  return entry ? entry.at : order.opened_at
+}
+
+/* -------------------------------------------------------------------------- */
 /* Main Component                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -255,10 +274,25 @@ export default function KitchenPage() {
     }
   }
 
-  const handleManualMove = async (orderId: number, status: OrderStatusValue) => {
+const handleManualMove = async (orderId: number, status: OrderStatusValue) => {
     const oldOrders = [...orders]
     
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o))
+    // Update history optimistically here too
+    const nowISO = new Date().toISOString()
+
+    setOrders(prev => prev.map(o => {
+        if (o.id === orderId) {
+            return { 
+                ...o, 
+                status: status,
+                statusHistory: [
+                    ...(o.statusHistory || []),
+                    { status: status, at: nowISO }
+                ]
+            }
+        }
+        return o
+    }))
     
     try {
         await updateKDSOrderStatus(orderId, status)
@@ -464,7 +498,13 @@ function KDSColumn({ config, orders, isOver, draggedOrderId, onDragOver, onDrop,
 }
 
 function KDSTicket({ order, isDragging, onMove, onDragStart, onDragEnd }: { order: KDSOrder, isDragging: boolean, onMove: (id: number, s: OrderStatusValue) => void, onDragStart: (e: any, id: number) => void, onDragEnd: () => void }) {
-  const elapsed = useElapsedTimer(order.opened_at)
+  
+  // Determine the start time dynamically based on status
+  const startTime = getOrderStartTime(order)
+
+  // Pass the specific status time instead of the generic opened_at
+  const elapsed = useElapsedTimer(startTime)
+  
   const isCancelled = order.status === "cancelled"
 
   return (

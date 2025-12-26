@@ -32,10 +32,18 @@ import {
   type ActiveSessionData,
   type OrderStatus,
   type OrderItemStatus,
-  type OrderSummary
+  type OrderSummary,
+  subscribeToSessionStatus
 } from "@/api/portal"
 import { useSearchParams } from "react-router-dom"
 import { getDeviceId } from "@/utils/device"
+import PortalSkeleton from "@/components/portal/PortalSkeleton"
+import OrderTrackerCard from "@/components/portal/OrderTrackerCard"
+import LiveOrderTracker from "@/components/portal/LiveOrderTracker"
+import ProductDetailDrawer from "@/components/portal/ProductDetailDrawer"
+import CartDrawer from "@/components/portal/CartDrawer"
+import DeviceBlockedScreen from "@/components/portal/DeviceLockedScreen"
+import ProductSection from "@/components/portal/ProductSection"
 
 /* -------------------------------------------------------------------------- */
 /* Main Component                                                             */
@@ -51,7 +59,13 @@ export default function PortalPage() {
 
   // Device Blocking State
   const [isDeviceBlocked, setIsDeviceBlocked] = React.useState(false)
-  const [lockedInfo, setLockedInfo] = React.useState<{restaurant: string, table: string} | null>(null)
+  const [lockedInfo, setLockedInfo] = React.useState<{
+      restaurant: string, 
+      table: string,
+      currency: string,
+      categories: PortalCategory[],
+      products: PortalProduct[]
+  } | null>(null)
 
   const [session, setSession] = React.useState<TableSession | null>(null)
   const [categories, setCategories] = React.useState<PortalCategory[]>([])
@@ -130,7 +144,10 @@ export default function PortalPage() {
            setIsDeviceBlocked(true)
            setLockedInfo({
                restaurant: e.payload.restaurant_name,
-               table: e.payload.table_name
+               table: e.payload.table_name,
+               currency: e.payload.currency || "USD",
+               categories: e.payload.menu?.categories || [], // <--- IMPORTANT
+               products: e.payload.menu?.products || []
            })
            // We do NOT set generic error, so the specific UI below renders instead
         } else {
@@ -190,6 +207,36 @@ export default function PortalPage() {
     }
   }, [activeSessionData?.session_id, (activeSessionData as any)?.orders?.length, session?.session_status])
 
+  // -- Real-time Sub (Session Status) --
+    React.useEffect(() => {
+      if (!session?.active_session_id || session.session_status === 'closed') return;
+
+      const unsubscribe = subscribeToSessionStatus(session.active_session_id, () => {
+          // 1. Toast Notification
+          toast.success("Session Completed", {
+              description: "Your tab has been closed. Thank you for visiting!",
+              duration: 5000,
+          });
+
+          // 2. Update Session State to Closed
+          setSession(prev => prev ? { ...prev, session_status: 'closed' } : null);
+
+          // 3. Update Active Session Data (stop the tracker pulse)
+          setActiveSessionData(prev => {
+              // If we want to keep the data visible but mark it paid:
+              if(prev) return { ...prev, total_due: 0 }; 
+              return null;
+          });
+          
+          // 4. Close Modals
+          setIsCartOpen(false);
+          // We optionally keep tracker open or close it:
+          // setIsTrackerOpen(false); 
+      });
+
+      return () => unsubscribe();
+    }, [session?.active_session_id, session?.session_status]);
+
   // -- Category Scroll Logic
   const checkScroll = () => {
     if (categoryScrollRef.current) {
@@ -220,6 +267,16 @@ export default function PortalPage() {
 
 
   // -- Handlers
+
+  const handleProductClick = (product: PortalProduct) => {
+    if (canModifyOrder) {
+        setTempQty(1); 
+        setTempNotes(""); 
+        setSelectedProduct(product)
+    } else {
+        toast.info("Cannot add items. Session is closed.")
+    }
+  }
 
   const handleAddToCart = () => {
     if (!selectedProduct) return
@@ -417,55 +474,17 @@ export default function PortalPage() {
 
   // -- Render States
   if (isLoading) return <PortalSkeleton />
-  
-  // -- Render States
-  if (isLoading) return <PortalSkeleton />
 
   // Blocked Screen
   if (isDeviceBlocked) {
       return (
-          <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center space-y-8 bg-background relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-red-50 to-transparent pointer-events-none" />
-
-              <div className="relative z-10 flex flex-col items-center animate-in zoom-in-95 duration-500">
-                  <div className="h-24 w-24 bg-red-100 rounded-full flex items-center justify-center mb-6 shadow-xl shadow-red-100/50">
-                      <ShieldAlert className="h-10 w-10 text-red-600" />
-                  </div>
-                  
-                  <h1 className="text-3xl font-extrabold tracking-tight text-foreground mb-2">
-                      Table Occupied
-                  </h1>
-                  <p className="text-lg text-muted-foreground max-w-xs leading-relaxed">
-                      <span className="font-semibold text-foreground">{lockedInfo?.table}</span> is currently being managed by another device.
-                  </p>
-              </div>
-
-              <div className="w-full max-w-sm space-y-4 relative z-10">
-                  <div className="bg-muted/40 p-4 rounded-2xl border border-border/50 flex items-start gap-4 text-left">
-                      <Users className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
-                      <div className="space-y-1">
-                          <p className="font-semibold text-sm">Why am I seeing this?</p>
-                          <p className="text-xs text-muted-foreground">
-                              To prevent accidental double-orders, only one device can control the active tab at a time.
-                          </p>
-                      </div>
-                  </div>
-
-                  <Button 
-                      size="lg" 
-                      variant="outline"
-                      className="w-full h-14 rounded-xl border-2 font-bold gap-2"
-                      onClick={() => window.location.reload()}
-                  >
-                      Check Again
-                  </Button>
-                  
-                  <p className="text-xs text-muted-foreground pt-4">
-                      Need help? Please call a waiter.
-                  </p>
-              </div>
-          </div>
-      )
+      <DeviceBlockedScreen 
+      tableName={lockedInfo?.table} 
+      restaurantName={lockedInfo?.restaurant} // Make sure to set this in the error handler
+      categories={lockedInfo?.categories}
+      products={lockedInfo?.products}
+      currency={lockedInfo?.currency} 
+      />)
   }
 
 
@@ -505,135 +524,15 @@ export default function PortalPage() {
         )}
       </div>
 
-      {/* 2. Search Bar */}
-      <div className="px-6 pb-2 md:pb-4 max-w-3xl mx-auto">
-        <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-          <Input 
-            placeholder="Search for dishes, drinks, deserts..." 
-            className="pl-10 h-12 rounded-2xl bg-muted/30 border-transparent shadow-sm focus-visible:ring-1 focus-visible:ring-primary focus-visible:bg-background transition-all"
-          />
-        </div>
-      </div>
-
-      {/* 3. Categories */}
-      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-border/40 py-2">
-        <div className="relative max-w-7xl mx-auto px-2 md:px-6 flex items-center">
-          <div className={cn(
-            "hidden md:flex absolute left-0 top-0 bottom-0 w-24 bg-gradient-to-r from-background to-transparent z-10 items-center justify-start pl-4 transition-opacity duration-300",
-            !canScrollLeft && "opacity-0 pointer-events-none"
-          )}>
-             <Button size="icon" variant="outline" className="h-8 w-8 rounded-full bg-background shadow-md border-border/60 hover:scale-110 transition-transform" onClick={() => scrollCategories('left')}>
-                <ChevronLeft className="h-4 w-4" />
-             </Button>
-          </div>
-
-          <div 
-            ref={categoryScrollRef}
-            className="flex w-full overflow-x-auto gap-2 p-2 px-4 scrollbar-hide snap-x snap-mandatory"
-            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-          >
-             <button
-               onClick={() => setActiveCategory("popular")}
-               className={cn(
-                 "snap-start flex-shrink-0 flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition-all duration-300 ease-out select-none border",
-                 activeCategory === "popular"
-                   ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/25 scale-100"
-                   : "bg-card text-muted-foreground border-border/40 hover:bg-accent hover:text-foreground hover:border-border"
-               )}
-             >
-               <Flame className={cn("h-4 w-4", activeCategory === "popular" ? "text-white fill-white" : "text-orange-500 fill-orange-500")} />
-               Popular
-             </button>
-
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.slug)}
-                className={cn(
-                  "snap-start flex-shrink-0 flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition-all duration-300 ease-out select-none border",
-                  activeCategory === cat.slug
-                    ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/25 scale-100"
-                    : "bg-card text-muted-foreground border-border/40 hover:bg-accent hover:text-foreground hover:border-border"
-                )}
-              >
-                {cat.name}
-              </button>
-            ))}
-          </div>
-
-          <div className={cn(
-            "hidden md:flex absolute right-0 top-0 bottom-0 w-24 bg-gradient-to-l from-background to-transparent z-10 items-center justify-end pr-4 transition-opacity duration-300",
-            !canScrollRight && "opacity-0 pointer-events-none"
-          )}>
-             <Button size="icon" variant="outline" className="h-8 w-8 rounded-full bg-background shadow-md border-border/60 hover:scale-110 transition-transform" onClick={() => scrollCategories('right')}>
-                <ChevronRight className="h-4 w-4" />
-             </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. Product Grid */}
-      <div className="px-4 md:px-6 py-6 max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-          {filteredProducts.map((product) => (
-            <div 
-              key={product.id}
-              onClick={() => {
-                if (canModifyOrder) {
-                    setTempQty(1); setTempNotes(""); setSelectedProduct(product)
-                } else {
-                    toast.info("Cannot add items. Session is closed.")
-                }
-              }}
-              className={cn(
-                  "group relative flex sm:flex-col gap-4 p-3 md:p-4 rounded-3xl border border-border/40 bg-card/50 hover:bg-card hover:border-primary/20 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 cursor-pointer overflow-hidden",
-                  !canModifyOrder && "opacity-60 grayscale-[0.5] cursor-not-allowed"
-              )}
-            >
-              <div className="relative h-28 w-28 sm:h-48 sm:w-full shrink-0 overflow-hidden rounded-2xl bg-muted">
-                {product.image ? (
-                   <img 
-                    src={product.image} 
-                    alt={product.name}
-                    className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  />
-                ) : (
-                   <div className="h-full w-full flex items-center justify-center bg-muted text-muted-foreground">
-                      <Utensils className="h-8 w-8" />
-                   </div>
-                )}
-               
-                {product.is_popular && (
-                  <div className="absolute left-2 top-2 rounded-full bg-orange-500/90 backdrop-blur-sm px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                    POPULAR
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-1 flex-col justify-between">
-                <div className="space-y-1.5">
-                  <h3 className="font-bold text-lg text-foreground leading-tight line-clamp-2 group-hover:text-primary transition-colors">
-                    {product.name}
-                  </h3>
-                  <p className="text-sm text-muted-foreground line-clamp-2">
-                    {product.description}
-                  </p>
-                </div>
-                <div className="flex items-end justify-between mt-4">
-                  <span className="font-bold text-lg text-primary">
-                    {formatMoney(product.price, currency)}
-                  </span>
-                  {canModifyOrder && (
-                      <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-all duration-300">
-                        <Plus className="h-4 w-4" />
-                      </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* 2. Product Section */}
+      <ProductSection 
+        restaurantName={session?.restaurant_name}
+        categories={categories}
+        products={products}
+        currency={currency}
+        canModifyOrder={canModifyOrder}
+        onProductClick={handleProductClick}
+      />
 
       {/* 5. Active Session Tracker Pill */}
       <AnimatePresence>
@@ -745,189 +644,31 @@ export default function PortalPage() {
       </AnimatePresence>
 
       {/* 7. Product Detail Drawer */}
-      <Drawer open={!!selectedProduct} onOpenChange={(o) => !o && setSelectedProduct(null)}>
-        <DrawerContent className="max-w-lg mx-auto h-auto max-h-[94vh] sm:max-h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 outline-none flex flex-col">
-          {selectedProduct && (
-            <div className="mx-auto w-full flex-1 overflow-y-auto rounded-t-[inherit]">
-              <div className="p-0 relative">
-                <div className="relative h-64 sm:h-80 w-full overflow-hidden rounded-t-[inherit] bg-muted">
-                  {selectedProduct.image && (
-                      <img 
-                        src={selectedProduct.image} 
-                        alt={selectedProduct.name}
-                        className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
-                      />
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/30 to-transparent opacity-80" />
-                  <DrawerClose asChild>
-                    <Button variant="ghost" size="icon" className="absolute top-4 right-4 bg-black/20 hover:bg-black/40 text-white rounded-full h-10 w-10 backdrop-blur-sm">
-                      <X className="h-5 w-5" />
-                    </Button>
-                  </DrawerClose>
-                </div>
-              </div>
-              
-              <div className="px-6 pt-6 pb-48">
-                  <DrawerHeader className="text-left p-0 space-y-4">
-                  <div className="flex flex-col gap-2">
-                    {selectedProduct.is_popular && (
-                      <span className="inline-flex items-center rounded-md bg-orange-50 px-2 py-1 text-xs font-medium text-orange-700 ring-1 ring-inset ring-orange-600/10 w-fit">
-                        Popular Choice
-                      </span>
-                    )}
-                    <div className="flex justify-between items-start gap-4">
-                        <DrawerTitle className="text-3xl font-extrabold leading-tight">{selectedProduct.name}</DrawerTitle>
-                    </div>
-                      <span className="text-2xl font-bold text-primary">{formatMoney(selectedProduct.price, currency)}</span>
-                  </div>
-                  
-                  <p className="text-muted-foreground leading-relaxed text-lg">
-                    {selectedProduct.description}
-                  </p>
-                  
-                  <div className="pt-4 space-y-3">
-                    <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
-                      <ChefHat className="h-4 w-4" />
-                      Special Instructions
-                    </label>
-                    <Textarea 
-                      value={tempNotes}
-                      onChange={(e) => setTempNotes(e.target.value)}
-                      placeholder="Allergies, removal of ingredients, extra sauce..."
-                      className="resize-none bg-muted/30 border-border/50 focus:bg-background transition-all min-h-[80px] rounded-xl"
-                    />
-                  </div>
-                </DrawerHeader>
-              </div>
-            </div>
-          )}
-
-           {selectedProduct && (
-             <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md absolute bottom-0 left-0 right-0 rounded-b-[inherit]">
-               <div className="flex items-center justify-between gap-4 mb-4">
-                   <span className="font-semibold text-lg">Quantity</span>
-                   <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border/50">
-                     <Button 
-                       variant="ghost" size="icon" className="h-10 w-10 rounded-lg hover:bg-background hover:shadow-sm transition-all"
-                       onClick={() => setTempQty(Math.max(1, tempQty - 1))}
-                     >
-                       <Minus className="h-5 w-5" />
-                     </Button>
-                     <span className="font-bold w-12 text-center tabular-nums text-lg">
-                       {tempQty}
-                     </span>
-                     <Button 
-                       variant="ghost" size="icon" className="h-10 w-10 rounded-lg hover:bg-background hover:shadow-sm transition-all"
-                       onClick={() => setTempQty(tempQty + 1)}
-                     >
-                       <Plus className="h-5 w-5" />
-                     </Button>
-                   </div>
-               </div>
-               <Button className="w-full h-14 text-lg font-bold rounded-2xl shadow-lg shadow-primary/20" onClick={handleAddToCart}>
-                 Add to Order &nbsp;&bull;&nbsp; {formatMoney(selectedProduct.price * tempQty, currency)}
-               </Button>
-             </div>
-           )}
-        </DrawerContent>
-      </Drawer>
+      <ProductDetailDrawer 
+        product={selectedProduct}
+        currency={currency}
+        quantity={tempQty}
+        setQuantity={setTempQty}
+        notes={tempNotes}
+        setNotes={setTempNotes}
+        onClose={() => setSelectedProduct(null)}
+        onAddToCart={handleAddToCart}
+      />
 
       {/* 8. Cart Drawer (Only reachable if canModifyOrder is true) */}
-      <Drawer open={isCartOpen} onOpenChange={setIsCartOpen}>
-         <DrawerContent className="max-w-lg mx-auto h-[92vh] sm:h-[85vh] sm:rounded-t-[2rem] mt-0 sm:mt-4 flex flex-col outline-none">
-          <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-center">
-              <DrawerClose asChild>
-                 <Button variant="ghost" size="icon" className="absolute left-4 hidden sm:flex">
-                   <X className="h-5 w-5" />
-                 </Button>
-             </DrawerClose>
-             <DrawerTitle className="flex flex-col items-center gap-0.5">
-               <span className="text-2xl font-bold">{activeSessionData ? "Modify Order" : "Current Order"}</span>
-               {activeSessionData && <span className="text-xs font-normal text-muted-foreground">Session Active</span>}
-             </DrawerTitle>
-          </DrawerHeader>
-          
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
-            {cart.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground space-y-4 opacity-50 pb-12">
-                <ShoppingBag className="h-24 w-24 stroke-[1]" />
-                <p className="text-lg font-medium">Your cart is currently empty</p>
-              </div>
-            ) : (
-              cart.map((item, idx) => {
-                const locked = isLocked(item.order_status);
-
-                return (
-                    <div key={idx} className={cn("flex items-start justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards", locked && "opacity-80")} style={{ animationDelay: `${idx * 50}ms` }}>
-                    
-                    {/* <pre>{JSON.stringify(item, null, 2)}</pre> */}
-                    
-                    <div className="flex items-center gap-4">
-                        {/* Qty Control / Lock Status */}
-                        <div className={cn("flex flex-col items-center justify-center rounded-xl border w-10 h-24 shrink-0", locked ? "bg-muted/40 border-transparent" : "bg-muted/30 border-primary/20")}>
-                             {locked ? (
-                                 <div className="flex flex-col items-center justify-center gap-2 h-full text-muted-foreground">
-                                     <span className="font-bold text-lg">{item.quantity}</span>
-                                     <div className="h-4 w-4 bg-current mask-lock" /> {/* CSS mask or similar, represented by check below if generic */}
-                                     <CheckCircle2 className="h-4 w-4" />
-                                 </div>
-                             ) : (
-                                 <>
-                                     <button onClick={() => handleIncrement(idx)} className="flex-1 w-full flex items-center justify-center hover:bg-primary/10 hover:text-primary transition-colors rounded-t-xl"><Plus className="h-3.5 w-3.5"/></button>
-                                     
-                                     <span className="font-bold text-sm py-1">{item.quantity}</span>
-                                     
-                                     <button onClick={() => handleDecrement(idx)} className="flex-1 w-full flex items-center justify-center hover:bg-destructive/10 hover:text-destructive transition-colors rounded-b-xl"><Minus className="h-3.5 w-3.5"/></button>
-                                  </>
-                             )}
-                        </div>
-
-                        <div>
-                        <div className="flex items-center gap-2">
-                             <p className="font-bold text-base">{item.product.name}</p>
-                             {locked && <span className="text-[10px] uppercase font-bold bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">{item.order_status}</span>}
-                        </div>
-                        <p className="text-sm text-muted-foreground">{formatMoney(item.product.price, currency)} each</p>
-                        {item.notes && (
-                            <div className="mt-1 flex items-start gap-1.5 text-xs text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400 p-1.5 rounded-md">
-                            <ChefHat className="h-3 w-3 mt-0.5 shrink-0" />
-                            <span className="italic leading-snug">"{item.notes}"</span>
-                            </div>
-                        )}
-                        </div>
-                    </div>
-                    <p className="font-bold text-base tabular-nums">
-                        {formatMoney(item.product.price * item.quantity, currency)}
-                    </p>
-                    </div>
-                )
-              })
-            )}
-          </div>
-
-          <div className="border-t border-border p-6 bg-muted/30 shrink-0 space-y-6 pb-10 sm:pb-6 sm:rounded-b-[2rem]">
-            <div className="space-y-3">
-              <div className="flex justify-between text-base">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span className="font-medium">{formatMoney(cartTotal, currency)}</span>
-              </div>
-              <div className="flex justify-between text-xl font-bold">
-                <span>Total</span>
-                <span className="text-primary">{formatMoney(cartTotal, currency)}</span>
-              </div>
-            </div>
-            
-            <Button 
-              className="w-full h-14 text-lg font-bold rounded-2xl gap-2 shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all"
-              disabled={cart.length === 0 || isOrdering}
-              onClick={handleOrderSubmission}
-            >
-              {isOrdering ? "Sending to Kitchen..." : (activeSessionData ? "Update Tab" : "Place Order")}
-              {!isOrdering && <ChevronRight className="h-5 w-5" />}
-            </Button>
-          </div>
-        </DrawerContent>
-      </Drawer>
+      <CartDrawer 
+        isOpen={isCartOpen}
+        onOpenChange={setIsCartOpen}
+        cart={cart}
+        activeSessionData={activeSessionData}
+        currency={currency}
+        cartTotal={cartTotal}
+        isOrdering={isOrdering}
+        onIncrement={handleIncrement}
+        onDecrement={handleDecrement}
+        onSubmit={handleOrderSubmission}
+        isLocked={(status) => isLocked(status)}
+      />
 
       {/* 9. Live Order Tracker */}
       <LiveOrderTracker 
@@ -941,362 +682,6 @@ export default function PortalPage() {
   )
 }
 
-/* -------------------------- Sub-components -------------------------- */
 
 
-function LiveOrderTracker({ isOpen, onClose, sessionData, currency }: { isOpen: boolean, onClose: () => void, sessionData: ActiveSessionData | null, currency: string }) {
-    if (!sessionData) return null
 
-
-  // 1. Prepare Orders
-  let orders = (sessionData as any).orders || [];
-
-  // Fallback: Virtual order if orders array is missing but items exist
-  if (orders.length === 0 && sessionData.items.length > 0) {
-    orders = [{
-      id: sessionData.session_id,
-      status: sessionData.status,
-      items: sessionData.items,
-      total: sessionData.total_due, // Fallback to session total
-      estimatedTime: sessionData.estimatedTime,
-      timestamp: sessionData.timestamp
-    }];
-  }
-
-  // 2. Sort: Active orders first, then completed/cancelled
-  const sortedOrders = [...orders].sort((a: any, b: any) => {
-     const score = (s: string) => {
-       if (['ready', 'preparing', 'pending'].includes(s)) return 2;
-       if (s === 'served') return 1;
-       return 0;
-     }
-     return score(b.status) - score(a.status) || b.id - a.id;
-  });
-
-  // 3. Fix Total: Calculate sum of ONLY the orders shown
-  const ordersTotal = sortedOrders.reduce((acc: number, o: any) => acc + (o.status !== 'cancelled' ? o.total : 0), 0);
-
-    return (
-      <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
-        <DrawerContent className="max-w-lg mx-auto h-[90vh] rounded-t-[2rem]">
-          <DrawerHeader className="border-b border-border/50 pb-4 shrink-0 relative flex items-center justify-between px-6 pt-6">
-              <div className="text-left">
-                <DrawerTitle className="text-2xl font-bold flex items-center gap-2">
-                  Session Status
-                  <span className="flex h-2.5 w-2.5 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                  </span>
-                </DrawerTitle>
-                {/* <p className="text-sm text-muted-foreground font-medium mt-1">Session #{sessionData.session_id}</p> */}
-                
-                {/* <pre>{JSON.stringify(orders, null, 2)}</pre> */}
-              </div>
-              <DrawerClose asChild>
-                 <Button variant="ghost" size="icon" className="rounded-full bg-muted/50 hover:bg-muted">
-                   <X className="h-5 w-5" />
-                 </Button>
-             </DrawerClose>
-          </DrawerHeader>
-          
-          <div className="flex-1 overflow-y-auto bg-muted/10 p-6 space-y-6">
-             {/* Render a tracker card for EACH order in the session */}
-             {orders.length > 0 ? (
-                 orders.map((order: any) => (
-                     <OrderTrackerCard key={order.id} order={order} currency={currency} />
-                 ))
-             ) : (
-                 <div className="text-center text-muted-foreground p-4">No active orders found.</div>
-             )}
-             
-             <div className="border-t pt-4 mt-8">
-                 <div className="flex justify-between text-xl font-bold"><span>Total Due</span><span>{formatMoney(ordersTotal, currency)}</span></div>
-             </div>
-          </div>
-          
-           {/* Footer Actions */}
-           <div className="p-4 sm:p-6 border-t border-border/50 bg-background/80 backdrop-blur-md sm:rounded-b-[2rem]">
-             <Button 
-               className="w-full h-14 text-lg font-bold rounded-xl shadow-lg text-white shadow-primary/10" 
-               variant="default" 
-               onClick={onClose}
-             >
-               Back to Menu
-             </Button>
-          </div>
-
-        </DrawerContent>
-      </Drawer>
-    )
-}
-
-
-function OrderTrackerCard({ order, currency }: { order: OrderSummary, currency: string }) {
-  // 1. Define the happy path steps
-  const steps = [
-    { id: 'pending', label: 'Received', icon: <Receipt className="h-3.5 w-3.5" /> }, 
-    { id: 'preparing', label: 'Cooking', icon: <ChefHat className="h-3.5 w-3.5" /> }, 
-    { id: 'ready', label: 'Ready', icon: <BellRing className="h-3.5 w-3.5" /> }, // Changed icon to BellRing
-    { id: 'served', label: 'Served', icon: <CheckCircle2 className="h-3.5 w-3.5" /> }
-  ]
-
-  // 2. Handle Edge Cases (Cancelled/Refunded)
-  const isCancelled = order.status === 'cancelled';
-  
-  // 3. Normalize Status for the Stepper
-  // Map 'completed' -> 'served' for the UI. 
-  const statusForStepper = order.status === 'completed' ? 'served' : order.status;
-  
-  // Find current index. If status is unknown (like cancelled), default to -1
-  const currentIdx = steps.findIndex(s => s.id === statusForStepper);
-  
-  // Progress Calculation
-  // If cancelled, 0 progress. If served/completed, 100%.
-  const progressPercent = isCancelled 
-    ? 0 
-    : (currentIdx / (steps.length - 1)) * 100;
-
-  return (
-    <div className={cn(
-      "flex flex-col gap-5 py-6 border-b border-border/50 last:border-0 last:pb-0 first:pt-2 transition-opacity",
-      isCancelled && "opacity-60 grayscale-[0.8]" // Dim cancelled orders
-    )}>
-      
-      {/* --- Header: Order Info & Main Status --- */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-2.5">
-            <h3 className="font-bold text-lg tracking-tight text-foreground">
-              Order #{order.id}
-            </h3>
-            <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md border border-border/50">
-              {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground font-medium pl-0.5">
-            {order.items.length} {order.items.length === 1 ? 'item' : 'items'} &bull; {order.estimatedTime || 'ASAP'}
-          </p>
-        </div>
-        
-        {/* Status Badge */}
-        <div className={cn(
-          "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm border",
-          isCancelled 
-            ? "bg-red-100 text-red-700 border-red-200"
-            : order.status === 'served' || order.status === 'completed'
-              ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
-              : "bg-primary/10 text-primary border-primary/20"
-        )}>
-          {/* Pulsing Dot for active statuses */}
-          {!isCancelled && order.status !== 'served' && order.status !== 'completed' && (
-             <span className="relative flex h-2 w-2">
-               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-75"></span>
-               <span className="relative inline-flex rounded-full h-2 w-2 bg-current"></span>
-             </span>
-          )}
-          {isCancelled ? "Cancelled" : order.status}
-        </div>
-      </div>
-
-      {/* --- Stepper (Hide if cancelled) --- */}
-      {!isCancelled && (
-        <div className="w-full max-w-4xl mx-auto px-4 py-10">
-      <div className="relative">
-        
-        {/* 1. The Track - Matte & Solid
-            A simple, clean line. No blur, no glass. 
-            looks like a table runner or a timeline.
-        */}
-        <div className="absolute top-1/2 left-0 right-0 h-1 bg-muted/60 rounded-full -translate-y-1/2" />
-
-        {/* 2. The Progress Fill
-            Solid color. High contrast. 
-        */}
-        <motion.div
-          className="absolute top-1/2 left-0 h-1 bg-primary rounded-full -translate-y-1/2 origin-left z-0"
-          initial={{ width: "0%" }}
-          animate={{ width: `${(currentIdx / (steps.length - 1)) * 100}%` }}
-          transition={{ duration: 0.8, ease: "easeInOut" }}
-        />
-
-        {/* 3. The Steps */}
-        <div className="relative flex justify-between w-full z-10">
-          {steps.map((step, i) => {
-            const isActive = currentIdx === i;
-            const isCompleted = currentIdx > i;
-            const isPending = currentIdx < i;
-
-            return (
-              <div key={step.id} className="relative flex flex-col items-center group cursor-default">
-                
-                {/* The "Plate" Circle */}
-                <motion.div
-                  className={cn(
-                    "relative flex items-center justify-center w-12 h-12 rounded-full border-2 transition-colors duration-300 bg-background",
-                    // Completed: Solid Fill (Brand Color)
-                    isCompleted ? "bg-primary border-primary text-primary-foreground" : 
-                    // Active: White Plate with Color Rim
-                    isActive ? "border-primary text-primary" : 
-                    // Pending: Greyed out
-                    "border-muted text-muted-foreground/40"
-                  )}
-                  initial={false}
-                  animate={{
-                    scale: isActive ? 1.25 : 1, // Active step gets bigger (The Main Course)
-                    backgroundColor: isCompleted ? "var(--primary)" : "var(--background)",
-                  }}
-                  transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                >
-                  
-                  {/* The Double Ring Effect for Active State (Like a clean plate rim) */}
-                  {isActive && (
-                    <motion.div
-                      layoutId="plate-ring"
-                      className="absolute -inset-[5px] rounded-full border border-primary/30"
-                      transition={{ duration: 0.3 }}
-                    />
-                  )}
-
-                  {/* Icon Switcher */}
-                  <AnimatePresence mode="wait">
-                    {isCompleted ? (
-                      <motion.div
-                        key="check"
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className="flex items-center justify-center"
-                      >
-                         {/* <Check className="w-6 h-6 stroke-[3]" /> */}
-                          <div className="h-[15px]">{step.icon}</div>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="icon"
-                        className="flex items-center justify-center"
-                        // The "Bell Ring" Animation
-                        // A slow, pendulum swing. Distinctly "analog" feel.
-                        animate={isActive ? { rotate: [0, 10, -10, 5, -5, 0] } : { rotate: 0 }}
-                        transition={isActive ? {
-                          repeat: Infinity,
-                          repeatDelay: 2, // Calm waits between movements
-                          duration: 2,
-                          ease: "easeInOut"
-                        } : {}}
-                      >
-                        <div className="w-5 h-5">
-                            {step.icon}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-
-                {/* Typography: Clean, Menu-style */}
-                <div className="absolute top-16 w-32 flex flex-col items-center text-center">
-                  <span className={cn(
-                    "text-xs font-bold tracking-wider uppercase transition-colors duration-300",
-                    isActive ? "text-primary" : "text-muted-foreground",
-                    // Hide inactive labels on mobile to keep it clean
-                    !isActive && "hidden sm:block"
-                  )}>
-                    {step.label}
-                  </span>
-                  
-                  {/* Optional: Add a "Serving" status text for the active item */}
-                  {isActive && (
-                    <motion.span 
-                      initial={{ opacity: 0, y: -5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="text-[10px] text-muted-foreground font-medium mt-1 sm:hidden"
-                    >
-                      Step {i + 1}
-                    </motion.span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-      )}
-
-      {/* --- Item List (With Granular Status) --- */}
-      <div className="bg-muted/20 rounded-xl border border-border/40 overflow-hidden mt-1">
-        <div className="px-4 py-3 space-y-3">
-          {order.items.map((item: any, idx: number) => {
-            // Check if item status differs significantly from order status
-            const showItemStatus = item.status && item.status !== 'pending' && item.status !== 'served';
-            
-            return (
-              <div key={idx} className="flex justify-between items-start text-sm group">
-                <div className="flex gap-3 items-start">
-                  <span className="font-mono text-xs font-bold text-muted-foreground bg-background border border-border/60 rounded px-1.5 min-w-[26px] text-center pt-0.5 shadow-sm">
-                    {item.quantity}x
-                  </span>
-                  <div className="flex flex-col leading-snug">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-foreground/90">{item.product.name}</span>
-                      
-                      {/* <pre>{JSON.stringify(order, null, 2)}</pre> */}
-
-                      {/* Granular Item Status Badge */}
-                      {showItemStatus && (
-                         <span className={cn(
-                           "text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
-                           item.status === 'cooking' ? "bg-orange-100 text-orange-600" :
-                           item.status === 'ready' ? "bg-blue-100 text-blue-600" :
-                           "bg-gray-100 text-gray-600"
-                         )}>
-                           {item.status}
-                         </span>
-                      )}
-                    </div>
-
-                    {item.notes && (
-                      <span className="text-[11px] text-orange-600/90 italic mt-0.5 flex items-start gap-1">
-                        <span className="text-[9px] leading-[14px]">📝</span> 
-                        {item.notes}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <span className="font-mono text-xs text-muted-foreground pt-0.5">
-                  {formatMoney(item.quantity * item.product.price, currency)}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-        
-        {/* Total Footer */}
-        <div className="bg-muted/40 border-t border-border/40 px-4 py-3 flex justify-between items-center">
-          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Order Total</span>
-          <span className="font-bold text-sm text-foreground">{formatMoney(order.total, currency)}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function PortalSkeleton() { 
-  return (
-    <div className="p-6 space-y-8 max-w-5xl mx-auto">
-      <div className="space-y-3">
-        <Skeleton className="h-10 w-1/3" />
-        <Skeleton className="h-5 w-1/4" />
-      </div>
-      <div className="flex gap-3 overflow-hidden">
-        <Skeleton className="h-10 w-28 rounded-full" />
-        <Skeleton className="h-10 w-28 rounded-full" />
-        <Skeleton className="h-10 w-28 rounded-full" />
-        <Skeleton className="h-10 w-28 rounded-full" />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {[1,2,3,4,5,6].map(i => (
-           <Skeleton key={i} className="h-64 w-full rounded-3xl" />
-        ))}
-      </div>
-    </div>
-  ) 
-}
